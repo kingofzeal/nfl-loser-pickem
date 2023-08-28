@@ -1,186 +1,260 @@
-import 'dotenv/config';
-import express from 'express';
-import {
-  InteractionType,
-  InteractionResponseType,
-  InteractionResponseFlags,
-  MessageComponentTypes,
-  ButtonStyleTypes,
-} from 'discord-interactions';
-import { VerifyDiscordRequest, getRandomEmoji, DiscordRequest } from './utils.js';
-import { getShuffledOptions, getResult } from './game.js';
-import {
-  CHALLENGE_COMMAND,
-  TEST_COMMAND,
-  HasGuildCommands,
-} from './commands.js';
+const { App } = require('@slack/bolt');
+const axios = require('axios');
+require('dotenv').config();
+const sql = require('mssql');
 
-// Create an express app
-const app = express();
-// Get port, or default to 3000
-const PORT = process.env.PORT || 3000;
-// Parse request body and verifies incoming requests using discord-interactions package
-app.use(express.json({ verify: VerifyDiscordRequest(process.env.PUBLIC_KEY) }));
-
-// Store for in-progress games. In production, you'd want to use a DB
-const activeGames = {};
-
-/**
- * Interactions endpoint URL where Discord will send HTTP requests
- */
-app.post('/interactions', async function (req, res) {
-  // Interaction type and data
-  const { type, id, data } = req.body;
-
-  /**
-   * Handle verification requests
-   */
-  if (type === InteractionType.PING) {
-    return res.send({ type: InteractionResponseType.PONG });
+var sqlConfig = {
+  user: process.env.SQL_USERNAME,
+  password: process.env.SQL_PASSWORD,
+  database: process.env.SQL_DATABASE,
+  server: process.env.SQL_HOST,
+  pool: {
+    idleTimeoutMillis: 30000
+  },
+  options: {
+    encrypt: true
   }
+};
 
-  /**
-   * Handle slash command requests
-   * See https://discord.com/developers/docs/interactions/application-commands#slash-commands
-   */
-  if (type === InteractionType.APPLICATION_COMMAND) {
-    const { name } = data;
+var sqlClient;
 
-    // "test" guild command
-    if (name === 'test') {
-      // Send a message into the channel where command was triggered from
-      return res.send({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          // Fetches a random emoji to send from a helper function
-          content: 'hello world ' + getRandomEmoji(),
+// Initializes your app with your bot token and signing secret
+const app = new App({
+  token: process.env.SLACK_BOT_TOKEN,
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  socketMode: true,
+  appToken: process.env.SLACK_APP_TOKEN
+});
+
+app.message('hello', async ({message, say}) => {
+  await say({
+    blocks: [
+      {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
+          "text": `Hey <@${message.user}>`
         },
-      });
-    }
-    // "challenge" guild command
-    if (name === 'challenge' && id) {
-      const userId = req.body.member.user.id;
-      // User's object choice
-      const objectName = req.body.data.options[0].value;
-
-      // Create active game using message ID as the game ID
-      activeGames[id] = {
-        id: userId,
-        objectName,
-      };
-
-      return res.send({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          // Fetches a random emoji to send from a helper function
-          content: `Rock papers scissors challenge from <@${userId}>`,
-          components: [
-            {
-              type: MessageComponentTypes.ACTION_ROW,
-              components: [
-                {
-                  type: MessageComponentTypes.BUTTON,
-                  // Append the game ID to use later on
-                  custom_id: `accept_button_${req.body.id}`,
-                  label: 'Accept',
-                  style: ButtonStyleTypes.PRIMARY,
-                },
-              ],
-            },
-          ],
-        },
-      });
-    }
-  }
-
-  /**
-   * Handle requests from interactive components
-   * See https://discord.com/developers/docs/interactions/message-components#responding-to-a-component-interaction
-   */
-  if (type === InteractionType.MESSAGE_COMPONENT) {
-    // custom_id set in payload when sending message component
-    const componentId = data.custom_id;
-
-    if (componentId.startsWith('accept_button_')) {
-      // get the associated game ID
-      const gameId = componentId.replace('accept_button_', '');
-      // Delete message with token in request body
-      const endpoint = `webhooks/${process.env.APP_ID}/${req.body.token}/messages/${req.body.message.id}`;
-      try {
-        await res.send({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            // Fetches a random emoji to send from a helper function
-            content: 'What is your object of choice?',
-            // Indicates it'll be an ephemeral message
-            flags: InteractionResponseFlags.EPHEMERAL,
-            components: [
-              {
-                type: MessageComponentTypes.ACTION_ROW,
-                components: [
-                  {
-                    type: MessageComponentTypes.STRING_SELECT,
-                    // Append game ID
-                    custom_id: `select_choice_${gameId}`,
-                    options: getShuffledOptions(),
-                  },
-                ],
-              },
-            ],
+        "accessory": {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Click Me"
           },
-        });
-        // Delete previous message
-        await DiscordRequest(endpoint, { method: 'DELETE' });
-      } catch (err) {
-        console.error('Error sending message:', err);
-      }
-    } else if (componentId.startsWith('select_choice_')) {
-      // get the associated game ID
-      const gameId = componentId.replace('select_choice_', '');
-
-      if (activeGames[gameId]) {
-        // Get user ID and object choice for responding user
-        const userId = req.body.member.user.id;
-        const objectName = data.values[0];
-        // Calculate result from helper function
-        const resultStr = getResult(activeGames[gameId], {
-          id: userId,
-          objectName,
-        });
-
-        // Remove game from storage
-        delete activeGames[gameId];
-        // Update message with token in request body
-        const endpoint = `webhooks/${process.env.APP_ID}/${req.body.token}/messages/${req.body.message.id}`;
-
-        try {
-          // Send results
-          await res.send({
-            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: { content: resultStr },
-          });
-          // Update ephemeral message
-          await DiscordRequest(endpoint, {
-            method: 'PATCH',
-            body: {
-              content: 'Nice choice ' + getRandomEmoji(),
-              components: [],
-            },
-          });
-        } catch (err) {
-          console.error('Error sending message:', err);
+          "action_id": "button_click"
         }
       }
-    }
+    ],
+    text: `Hey <@${message.user}>`
+  });
+});
+
+async function getCurrentSelection(userId){
+  const response = await sqlClient.request()
+    .input('playerId', sql.NVarChar(100), userId)
+    .query(`SELECT t.Id
+    ,t.Name
+    ,t.Abbreviation
+  FROM Teams t
+  LEFT OUTER JOIN Games g ON g.Team1 = t.Id or g.Team2 = t.Id
+  LEFT OUTER JOIN PlayerTeams pt ON pt.TeamId = t.Id and pt.Week = g.Week
+  LEFT OUTER JOIN Players p ON p.Id = pt.PlayerId
+  LEFT OUTER JOIN Config c ON c.CurrentWeek = g.Week
+  WHERE c.Id = 1
+    and p.SlackId = @playerId`);
+
+  return response.recordset[0]
+}
+
+async function displaySelectionModal(triggerId, userId, client) {
+  const current = await getCurrentSelection(userId);
+  console.log(current);
+
+  const view = await client.views.open({
+    trigger_id: triggerId,
+    view: {
+      type: "modal",
+      callback_id: 'nfl_team_picked',
+      title: {
+        type: "plain_text",
+        text: "NFL Loser Pick'em"
+      },
+      close:{
+        type: "plain_text",
+        text: "Close"
+      },
+      blocks: [
+        {
+          type: "section",
+          text: {
+            "type": "mrkdwn",
+            "text": "Loading NFL data..."
+          }
+        }
+      ],      
+    },    
+  });
+
+
+  const ps = new sql.PreparedStatement();
+  ps.input('playerId', sql.NVarChar(100));
+
+  ps.prepare(`;WITH weekTeams AS (
+    SELECT t.Id
+  		,t.Name
+		  ,t.Abbreviation
+	  FROM Teams t
+	  LEFT OUTER JOIN Games g ON g.Team1 = t.Id or g.Team2 = t.Id
+	  LEFT OUTER JOIN Config c ON c.CurrentWeek = g.Week
+	  WHERE g.Id IS NOT NULL
+		  and c.Id = 1
+  ), playerSelection AS (
+    SELECT pt.*
+    FROM PlayerTeams pt
+    LEFT OUTER JOIN Players p ON pt.PlayerId = p.Id
+    LEFT OUTER JOIN Config c on c.CurrentWeek = pt.Week
+    WHERE p.SlackId = @playerId 
+      and c.Id = 1
+  )
+  
+  SELECT t.* 
+  FROM weekTeams t
+  LEFT OUTER JOIN playerSelection ps ON t.Id = ps.TeamId
+  WHERE ps.PlayerId IS NULL
+  ORDER BY t.Abbreviation ASC`, err => {
+    ps.execute({playerId: userId}, async (err, result) => {
+      const selections = [];
+
+      for (const team of result.recordset){
+        selections.push({
+          text: {
+            type: "plain_text",
+            text: `${team.Name} (${team.Abbreviation})`
+          },
+          value: `${team.Id}`
+        });
+      }
+
+      await client.views.update({
+        view_id: view.view.id,
+        view: {
+          type: "modal",
+          callback_id: 'nfl_team_picked',
+          title: {
+            type: "plain_text",
+            text: "NFL Loser Pick'em"
+          },
+          close:{
+            type: "plain_text",
+            text: "Close"
+          },
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `Current Selection: ${current.Name} (${current.Abbreviation})`
+              }
+            },
+            {
+              block_id: 'team_select',
+              type: "section",
+              text: {
+                "type": "mrkdwn",
+                "text": "Select your team"
+              },
+              accessory: {
+                action_id: "team_selection",
+                type: "static_select",
+                placeholder: {
+                  type: "plain_text",
+                  text: "Choose"
+                },
+                focus_on_load: true,            
+                options: selections
+              }        
+            }
+          ],
+          submit: {
+            type: "plain_text",
+            text: "Submit"
+          }
+        }
+      });
+      ps.unprepare(err => {});
+    });
+  });
+}
+
+app.view('nfl_team_picked', async ({ack, body, view, client, logger}) => {
+  console.log(view);
+
+  const selectedOption = view.state.values.team_select.team_selection.selected_option;
+
+  if (!selectedOption){
+    return;
   }
+
+  await updateUserSelection(ack, body.user.id, selectedOption);
 });
 
-app.listen(PORT, () => {
-  console.log('Listening on port', PORT);
+async function updateUserSelection(ack, userId, selection) {
+  console.log(selection);
 
-  // Check if guild commands from commands.js are installed (if not, install them)
-  HasGuildCommands(process.env.APP_ID, process.env.GUILD_ID, [
-    TEST_COMMAND,
-    CHALLENGE_COMMAND,
-  ]);
+  const request = new sql.Request();
+  request.input('UserSlackId', sql.NVarChar(), userId);
+  request.input('TeamId', sql.Int, +selection.value);
+
+  request.execute('usp_RecordUserSelection', async (err, result) => {
+    if (err){
+      console.log(err);
+    } else{
+      await ack({
+        response_action: 'update',
+        view: {
+          type: "modal",
+          callback_id: 'nfl_team_picked',
+          title: {
+            type: "plain_text",
+            text: "NFL Loser Pick'em"
+          },
+          close:{
+            type: "plain_text",
+            text: "Close"
+          },
+          blocks: [
+            {
+              type: "section",
+              text: {
+                "type": "mrkdwn",
+                "text": `Sucessfully picked *${selection.text.text}*`
+              }
+            }
+          ],      
+        }
+      })
+    }
+  })
+}
+
+app.command('/nfl', async ({ack, body, client, logger}) => {
+  await ack();
+
+  console.log(body.user_id);
+  await displaySelectionModal(body.trigger_id, body.user_id, client);
 });
+
+app.action('button_click', async ({ack, body, client, logger}) => {
+  await ack();
+
+  await displaySelectionModal(body.trigger_id, body.user.id, client);
+});
+
+(async () => {
+  
+  sqlClient = await sql.connect(sqlConfig);
+  // Start your app
+  await app.start(process.env.PORT || 3000);
+
+  console.log('⚡️ Bolt app is running!');
+})();
