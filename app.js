@@ -324,7 +324,85 @@ async function checkResults(){
 };
 
 async function checkScores(){
+  var pendingGames = await sqlClient.request()
+    .query(`SELECT
+      g.Id
+      ,g.Week
+      ,g.Season
+      ,g.GameTime
+      ,g.Team1Score
+      ,g.Team2Score
+      ,t1.Abbreviation as 'Team1Abbreviation'
+      ,t1.Name as 'Team1Name'
+      ,t2.Abbreviation as 'Team2Abbreviation'
+      ,t2.Name as 'Team2Name'
+    FROM Games g
+    LEFT JOIN Teams t1 ON t1.Id = g.Team1
+    LEFT JOIN Teams t2 ON t2.Id = g.Team2
+    WHERE g.GameTime < CURRENT_TIMESTAMP
+      and (g.Team1Score IS NULL
+      or g.Team2Score IS NULL)
+    ORDER BY g.GameTime ASC`);
 
+  const weekSets = {};
+
+  const weeks = pendingGames.recordset.map(x => { 
+    const key = `${x.Season}-${x.Week}`;
+    const cached = weekSets[key];
+    if (cached){
+      return cached;
+    }
+
+    const obj = {week: x.Week, season: x.Season}; 
+    weekSets[key] = obj;
+
+    return obj;
+  });
+
+  const weeksFiltered = [...new Set(weeks)];
+
+  //console.log(pendingGames.recordset);
+  //console.log(weeks);
+  //console.log(weeksFiltered);
+
+  for (const week of weeksFiltered){
+    const weekData = await axios.get(`https://cdn.espn.com/core/nfl/schedule?xhr=1&year=${week.season}&week=${week.week}`);
+    // console.log(weekData);
+
+    for (const date in weekData.data.content.schedule){
+      const gameDate = weekData.data.content.schedule[date];
+      for (const game of gameDate.games){
+        const details = game.competitions[0];
+
+        if (!details.status.type.completed){
+          continue;
+        }
+
+        for (const team of details.competitors){
+          const queryGame = pendingGames.recordset.filter(x => x.Team1Abbreviation === team.team.abbreviation ||
+            x.Team2Abbreviation === team.team.abbreviation)[0];
+
+          if (!queryGame){
+            continue;
+          }
+
+          if (queryGame.Team1Abbreviation === team.team.abbreviation){
+            const scoreUpdate = await sqlClient.request()
+              .input('gameId', sql.Int, queryGame.Id)
+              .input('team1Score', sql.Int, +team.score)
+              .query(`UPDATE Games SET Team1Score = @team1Score WHERE Id = @gameId`);
+          } else if (queryGame.Team2Abbreviation === team.team.abbreviation){
+            const scoreUpdate = await sqlClient.request()
+              .input('gameId', sql.Int, queryGame.Id)
+              .input('team2Score', sql.Int, +team.score)
+              .query(`UPDATE Games SET Team2Score = @team2Score WHERE Id = @gameId`);
+          }
+
+          console.log(`Game: ${queryGame.Team1Abbreviation} vs ${queryGame.Team2Abbreviation}: ${team.team.abbreviation} with ${team.score}`);
+        }
+      }
+    }
+  }
 };
 
 async function postReminder(){
@@ -399,9 +477,10 @@ app.view('init_parameters', async ({ack, body, view}) => {
   const purgeResult = await sqlClient.request()
     .input('teamId', sql.NVarChar(sql.MAX), body.team.id)
     .input('channelId', sql.NVarChar(sql.MAX), selectedChannel)
+    .input('season', sql.Int, selectedYear)
     .query(`TRUNCATE TABLE PlayerTeams;
       TRUNCATE TABLE Games;
-      UPDATE Config SET CurrentWeek = 1, SlackReportChannelId = @channelId WHERE SlackTeamId = @teamId;`);
+      UPDATE Config SET CurrentWeek = 1, Season = @season, SlackReportChannelId = @channelId WHERE SlackTeamId = @teamId;`);
 
   console.log('Game data and player selections purged.');
 
@@ -443,9 +522,10 @@ app.view('init_parameters', async ({ack, body, view}) => {
           .input('team1Id', sql.Int, knownTeams[details.competitors[0].team.abbreviation].Id)
           .input('team2Id', sql.Int, knownTeams[details.competitors[1].team.abbreviation].Id)
           .input('week', sql.Int, weekNum)
+          .input('season', sql.Int, selectedYear)
           .input('gameTime', sql.DateTimeOffset, details.date)
-          .query(`INSERT INTO Games (Week, Team1, Team2, GameTime)
-            VALUES (@week, @team1Id, @team2Id, @gameTime)`);
+          .query(`INSERT INTO Games (Week, Season, Team1, Team2, GameTime)
+            VALUES (@week, @season, @team1Id, @team2Id, @gameTime)`);
 
         //console.log(gameInsertResult);
 
