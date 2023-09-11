@@ -320,10 +320,34 @@ async function initializeGame(triggerId, client){
 };
 
 async function checkResults(){
+  //Set player results based on scores
+  await sqlClient.request()
+    .query(`UPDATE pt
+    SET pt.Result = CASE
+      WHEN pt.TeamId = g.Team1 and g.Team1Score < g.Team2Score THEN 1
+      WHEN pt.TeamId = g.Team2 and g.Team2Score < g.Team1Score THEN 1
+      ELSE 0
+    END
+    FROM PlayerTeams pt
+    LEFT OUTER JOIN Games g ON (g.Team1 = pt.TeamId or g.Team2 = pt.TeamId) and g.Week = pt.Week
+    WHERE g.Team1Score IS NOT NULL and
+      g.Team2Score IS NOT NULL and
+      pt.Result IS NULL`);
 
+  //Determine if all results are posted
+  //Post group selection/results if all results are in
 };
 
 async function checkScores(){
+  console.log('Beginning score check');
+  var pendingWeeks = await sqlClient.request()
+    .query(`SELECT DISTINCT
+      g.Week
+      ,g.Season
+    FROM Games g
+    INNER JOIN (SELECT DISTINCT CurrentWeek FROM Config) c ON c.CurrentWeek = g.Week
+    WHERE g.Team1Score IS NULL OR g.Team2Score IS NULL`)
+
   var pendingGames = await sqlClient.request()
     .query(`SELECT
       g.Id
@@ -339,42 +363,27 @@ async function checkScores(){
     FROM Games g
     LEFT JOIN Teams t1 ON t1.Id = g.Team1
     LEFT JOIN Teams t2 ON t2.Id = g.Team2
-    WHERE g.GameTime < CURRENT_TIMESTAMP
-      and (g.Team1Score IS NULL
-      or g.Team2Score IS NULL)
+    INNER JOIN (SELECT DISTINCT CurrentWeek FROM Config) c ON c.CurrentWeek = g.Week
+    WHERE g.Team1Score IS NULL or g.Team2Score IS NULL
     ORDER BY g.GameTime ASC`);
 
-  const weekSets = {};
-
-  const weeks = pendingGames.recordset.map(x => { 
-    const key = `${x.Season}-${x.Week}`;
-    const cached = weekSets[key];
-    if (cached){
-      return cached;
-    }
-
-    const obj = {week: x.Week, season: x.Season}; 
-    weekSets[key] = obj;
-
-    return obj;
-  });
-
-  const weeksFiltered = [...new Set(weeks)];
-
-  //console.log(pendingGames.recordset);
-  //console.log(weeks);
-  //console.log(weeksFiltered);
-
-  for (const week of weeksFiltered){
-    const weekData = await axios.get(`https://cdn.espn.com/core/nfl/schedule?xhr=1&year=${week.season}&week=${week.week}`);
-    // console.log(weekData);
+  for (const week of pendingWeeks.recordset){
+    const weekData = await axios.get(`https://cdn.espn.com/core/nfl/schedule?xhr=1&year=${week.Season}&week=${week.Week}`);
 
     for (const date in weekData.data.content.schedule){
       const gameDate = weekData.data.content.schedule[date];
+
       for (const game of gameDate.games){
         const details = game.competitions[0];
 
+        
+        if (!details || !details.status || !details.status.type) {
+          console.log(`Could not parse schedule details`);
+          continue;
+        }
+
         if (!details.status.type.completed){
+          console.log(`Game ${details.competitors[0].team.abbreviation} vs ${details.competitors[1].team.abbreviation}: Not yet completed.`)
           continue;
         }
 
@@ -383,22 +392,28 @@ async function checkScores(){
             x.Team2Abbreviation === team.team.abbreviation)[0];
 
           if (!queryGame){
+            console.log(`Game ${details.competitors[0].team.abbreviation} vs ${details.competitors[1].team.abbreviation}: Could not find matching game.`)
             continue;
           }
 
+          let field = '';
+
           if (queryGame.Team1Abbreviation === team.team.abbreviation){
-            const scoreUpdate = await sqlClient.request()
-              .input('gameId', sql.Int, queryGame.Id)
-              .input('team1Score', sql.Int, +team.score)
-              .query(`UPDATE Games SET Team1Score = @team1Score WHERE Id = @gameId`);
+            field = 'Team1Score';
           } else if (queryGame.Team2Abbreviation === team.team.abbreviation){
-            const scoreUpdate = await sqlClient.request()
-              .input('gameId', sql.Int, queryGame.Id)
-              .input('team2Score', sql.Int, +team.score)
-              .query(`UPDATE Games SET Team2Score = @team2Score WHERE Id = @gameId`);
+            field = 'Team2Score';
           }
 
-          console.log(`Game: ${queryGame.Team1Abbreviation} vs ${queryGame.Team2Abbreviation}: ${team.team.abbreviation} with ${team.score}`);
+          if (!field) {
+            continue;
+          }
+          
+          await sqlClient.request()
+            .input('gameId', sql.Int, queryGame.Id)
+            .input('teamScore', sql.Int, +team.score)
+            .query(`UPDATE Games SET ${field} = @teamScore WHERE Id = @gameId`);
+
+          console.log(`Game ${queryGame.Team1Abbreviation} vs ${queryGame.Team2Abbreviation}: ${team.team.abbreviation} with ${team.score}`);
         }
       }
     }
@@ -576,6 +591,7 @@ app.action('channel_selection', async ({ack}) => {
   cron.schedule('0 8 * * TUE', () => checkResults(), { timezone: 'America/Chicago' });
   cron.schedule('0 14 * * FRI', () => postReminder(), { timezone: 'America/Chicago' });
 
+ 
   if (!true){
     await app.client.chat.postMessage({
       channel: 'C2F7PQBJT',
