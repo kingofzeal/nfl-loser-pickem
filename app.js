@@ -2,6 +2,8 @@ const { App } = require('@slack/bolt');
 const axios = require('axios');
 const cron = require('node-cron');
 const sql = require('mssql');
+const canvasTable = require('canvas-table');
+const cnvs = require('canvas');
 require('dotenv').config();
 
 var sqlConfig = {
@@ -334,7 +336,128 @@ async function checkResults(){
       g.Team2Score IS NOT NULL and
       pt.Result IS NULL`);
 
-  //Determine if all results are posted
+  const remainingGames = await sqlClient.request()
+    .query(`SELECT
+      c.SlackTeamId
+      ,c.CurrentWeek
+      ,c.SlackReportChannelId
+      ,COUNT(*) as 'Count'
+    FROM PlayerTeams pt
+    INNER JOIN Players p ON p.Id = pt.PlayerId
+    INNER JOIN Config c ON c.SlackTeamId = p.SlackTeamId
+    WHERE pt.Result IS NULL
+      and pt.Week = c.CurrentWeek
+    GROUP BY c.SlackTeamId, c.CurrentWeek, c.SlackReportChannelId`);
+
+  for (const slackTeam of remainingGames.recordset){
+    if (slackTeam.Count > 0){
+      //Still has outstanding games
+      // continue;
+    }
+
+    const playerQuery = await sqlClient.request()
+      .input('slackTeam', sql.NVarChar(sql.MAX), slackTeam.SlackTeamId)
+      .query(`SELECT
+        p.Name
+        ,p.SlackId
+        ,pt.Week
+        ,t.Abbreviation
+        ,pt.Result
+      FROM Players p
+      LEFT OUTER JOIN PlayerTeams pt ON pt.PlayerId = p.Id
+      LEFT OUTER JOIN Teams t ON t.Id = pt.TeamId
+      WHERE p.SlackTeamId = @slackTeam`);
+
+    const players = [...new Set(playerQuery.recordset.map(x => x.Name))]
+
+    const imgWidth = (85 + ((slackTeam.CurrentWeek + 1) * 60)) + 10; //75 Name, 55 Record, 55/week
+    const imgHeight = (25 * (players.length + 1)) + 10;
+
+    const canvas = cnvs.createCanvas(imgWidth, imgHeight);
+    const config = {
+      columns: [
+        { 
+          title: '', 
+          options: { 
+            minWidth: 75
+          } 
+        },
+        { 
+          title: 'Record', 
+          options: { 
+            minWidth: 50,
+            textAlign: 'center' 
+          } 
+        },
+      ],
+      data: [],
+      options: {
+        borders: {
+          column: {
+            color: '#000000',
+            width: .5
+          },
+          row: {
+            color: '#000000',
+            width: .5
+          },
+          table: {
+            color: '#000000',
+            width: .5
+          }
+        },
+        padding: {
+          bottom: 5,
+          top: 5,
+          left: 5,
+          right: 5
+        },
+        devicePixelRatio: 2
+      }
+    }
+
+    for (let week = 1; week <= slackTeam.CurrentWeek; week++){
+      config.columns.push({ 
+        title: `Week ${week}`, 
+        options: { 
+          minWidth: 50,
+          textAlign: 'center'
+        }
+      });
+    }
+
+    for (const player of players){
+      const tableRecord = [player]
+      const wins = playerQuery.recordset.filter(x => x.Name == player && x.Result == 1);
+      const losses = playerQuery.recordset.filter(x => x.Name == player && x.Result == 0);
+      tableRecord.push({
+        value: `${wins.length}-${losses.length}`,
+        textAlign: 'center'
+      });
+
+      for (let week = 1; week <= slackTeam.CurrentWeek; week++){
+        const playerGame = playerQuery.recordset.filter(x => x.Name == player && x.Week == week)[0];
+        tableRecord.push({
+          value: playerGame.Abbreviation,
+          background: playerGame.Result ? '#009900' : '#990000',
+          textAlign: 'center'
+        });
+      }
+
+      config.data.push(tableRecord);
+    }
+ 
+    const ct = new canvasTable.CanvasTable(canvas, config);
+    await ct.generateTable();    
+    await ct.renderToFile(`${slackTeam.SlackTeamId}.png`);
+
+    app.client.filesUploadV2({
+      file: `${slackTeam.SlackTeamId}.png`,
+      filename: `${slackTeam.SlackTeamId} ${new Date().toISOString()}.png`,
+      channel_id: slackTeam.SlackReportChannelId
+    });
+  }
+
   //Post group selection/results if all results are in
 };
 
@@ -392,7 +515,6 @@ async function checkScores(){
             x.Team2Abbreviation === team.team.abbreviation)[0];
 
           if (!queryGame){
-            console.log(`Game ${details.competitors[0].team.abbreviation} vs ${details.competitors[1].team.abbreviation}: Could not find matching game.`)
             continue;
           }
 
