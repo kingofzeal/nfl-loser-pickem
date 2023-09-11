@@ -587,7 +587,7 @@ app.action('channel_selection', async ({ack}) => {
   await app.start(process.env.PORT || 3000);
 
   /* Scheduled Tasks */
-  cron.schedule('0 0 * * FRI-TUE', () => checkScores(), { timezone: 'America/Chicago' }); //All games are Thurs-Mon
+  cron.schedule('0 0 * * FRI,SAT,SUN,MON,TUE', () => checkScores(), { timezone: 'America/Chicago' }); //All games are Thurs-Mon
   cron.schedule('0 8 * * TUE', () => checkResults(), { timezone: 'America/Chicago' });
   cron.schedule('0 14 * * FRI', () => postReminder(), { timezone: 'America/Chicago' });
 
