@@ -56,12 +56,17 @@ async function getCurrentSelection(slackTeamId, userId){
     .query(`SELECT t.Id
     ,t.Name
     ,t.Abbreviation
+    ,CASE
+      WHEN g.GameTime < CURRENT_TIMESTAMP THEN 1
+      ELSE 0
+    END AS 'GameStarted'
+    ,c.SlackReportChannelId
   FROM Teams t
   LEFT OUTER JOIN Games g ON g.Team1 = t.Id or g.Team2 = t.Id
   LEFT OUTER JOIN PlayerTeams pt ON pt.TeamId = t.Id and pt.Week = g.Week
   LEFT OUTER JOIN Players p ON p.Id = pt.PlayerId
   LEFT OUTER JOIN Config c ON c.CurrentWeek = g.Week
-  WHERE c.Id = 1
+  WHERE c.SlackTeamId = @slackTeamId
     and p.SlackId = @playerId
     and p.SlackTeamId = @slackTeamId`);
 
@@ -71,6 +76,39 @@ async function getCurrentSelection(slackTeamId, userId){
 async function displaySelectionModal(triggerId, slackTeamId, userId, client) {
   const current = await getCurrentSelection(slackTeamId, userId);
   // console.log(current);
+
+  if (current.GameStarted){
+    await client.views.open({
+      trigger_id: triggerId,
+      view: {
+        type: 'modal',
+        title: {
+          type: 'plain_text',
+          text: 'NFL Loser Pick\'em'
+        },
+        close:{
+          type: 'plain_text',
+          text: 'Close'
+        },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              'type': 'mrkdwn',
+              'text': `You have selected *${current.Name} (${current.Abbreviation})*
+
+This game has already started, so you cannot change your selection.
+When all games have completed, the results will be posted in <#${current.SlackReportChannelId}>.
+
+*Good Luck*`
+            }
+          }
+        ],      
+      },    
+    });
+
+    return;
+  }
 
   const view = await client.views.open({
     trigger_id: triggerId,
@@ -108,7 +146,8 @@ async function displaySelectionModal(triggerId, slackTeamId, userId, client) {
       LEFT OUTER JOIN Games g ON g.Team1 = t.Id or g.Team2 = t.Id
       LEFT OUTER JOIN Config c ON c.CurrentWeek = g.Week
       WHERE g.Id IS NOT NULL
-        and c.Id = 1
+        and g.GameTime > CURRENT_TIMESTAMP
+        and c.SlackTeamId = @slackTeamId
     ), playerSelection AS (
       SELECT pt.*
       FROM PlayerTeams pt
@@ -173,7 +212,7 @@ async function displaySelectionModal(triggerId, slackTeamId, userId, client) {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `Current Selection: ${current.Name} (${current.Abbreviation})`
+        text: `Current Selection: *${current.Name} (${current.Abbreviation})*`
       }
     });
   }
@@ -322,6 +361,8 @@ async function initializeGame(triggerId, client){
 };
 
 async function checkResults(){
+  console.log('Generating results');
+
   //Set player results based on scores
   await sqlClient.request()
     .query(`UPDATE pt
@@ -341,18 +382,18 @@ async function checkResults(){
       c.SlackTeamId
       ,c.CurrentWeek
       ,c.SlackReportChannelId
-      ,COUNT(*) as 'Count'
-    FROM PlayerTeams pt
-    INNER JOIN Players p ON p.Id = pt.PlayerId
-    INNER JOIN Config c ON c.SlackTeamId = p.SlackTeamId
-    WHERE pt.Result IS NULL
-      and pt.Week = c.CurrentWeek
+      ,COUNT(pt.PlayerId) as 'PlayersRemaining'
+      ,COUNT(pt2.PlayerId) as 'TotalPlayers'
+    FROM Config c
+    INNER JOIN Players p on p.SlackTeamId = c.SlackTeamId
+    LEFT OUTER JOIN PlayerTeams pt ON pt.PlayerId = p.Id and pt.Week = c.CurrentWeek and pt.Result IS NULL
+    LEFT OUTER JOIN PlayerTeams pt2 ON pt2.PlayerId = p.Id and pt2.Week = c.CurrentWeek
     GROUP BY c.SlackTeamId, c.CurrentWeek, c.SlackReportChannelId`);
 
   for (const slackTeam of remainingGames.recordset){
-    if (slackTeam.Count > 0){
+    if (slackTeam.TotalPlayers == 0 || slackTeam.Count > 0){
       //Still has outstanding games
-      // continue;
+      continue;
     }
 
     const playerQuery = await sqlClient.request()
@@ -368,10 +409,10 @@ async function checkResults(){
       LEFT OUTER JOIN Teams t ON t.Id = pt.TeamId
       WHERE p.SlackTeamId = @slackTeam`);
 
-    const players = [...new Set(playerQuery.recordset.map(x => x.Name))]
+    const numPlayers = [...new Set(playerQuery.recordset.map(x => x.Name))].length
 
     const imgWidth = (85 + ((slackTeam.CurrentWeek + 1) * 60)) + 10; //75 Name, 55 Record, 55/week
-    const imgHeight = (25 * (players.length + 1)) + 10;
+    const imgHeight = (25 * (numPlayers + 1)) + 10;
 
     const canvas = cnvs.createCanvas(imgWidth, imgHeight);
     const config = {
@@ -393,17 +434,21 @@ async function checkResults(){
       data: [],
       options: {
         borders: {
+          header: {
+            color: '#000000',
+            width: 1
+          },
           column: {
             color: '#000000',
-            width: .5
+            width: 1
           },
           row: {
             color: '#000000',
-            width: .5
+            width: 1
           },
           table: {
             color: '#000000',
-            width: .5
+            width: 1
           }
         },
         padding: {
@@ -426,20 +471,52 @@ async function checkResults(){
       });
     }
 
+    const players = [];
+
+    for (const record of playerQuery.recordset){
+      let player = players.filter(x => x.name == record.Name)[0];
+
+      if (!player){
+        player = {
+          name: record.Name,
+          wins: 0,
+          losses: 0
+        };
+
+        players.push(player);
+      }
+
+      if (record.Result == 1){
+        player.wins++;
+      } else{
+        player.losses++;
+      }
+    }
+
+    players.sort((a, b) => {
+      if (a.wins < b.wins) return 1;
+      if (a.wins > b.wins) return -1;
+      if (a.losses < b.losses) return -1;
+      if (a.losses > b.losses) return 1;
+
+      if (a.name < b.name) return -1;
+      if (a.name > b.name) return 1;
+
+      return 0;
+    })
+
     for (const player of players){
-      const tableRecord = [player]
-      const wins = playerQuery.recordset.filter(x => x.Name == player && x.Result == 1);
-      const losses = playerQuery.recordset.filter(x => x.Name == player && x.Result == 0);
+      const tableRecord = [player.name]
       tableRecord.push({
-        value: `${wins.length}-${losses.length}`,
+        value: `${player.wins}-${player.losses}`,
         textAlign: 'center'
       });
 
       for (let week = 1; week <= slackTeam.CurrentWeek; week++){
-        const playerGame = playerQuery.recordset.filter(x => x.Name == player && x.Week == week)[0];
+        const playerGame = playerQuery.recordset.filter(x => x.Name == player.name && x.Week == week)[0];
         tableRecord.push({
           value: playerGame.Abbreviation,
-          background: playerGame.Result ? '#009900' : '#990000',
+          background: playerGame.Result ? '#339933' : '#cc3300',
           textAlign: 'center'
         });
       }
@@ -452,13 +529,17 @@ async function checkResults(){
     await ct.renderToFile(`${slackTeam.SlackTeamId}.png`);
 
     app.client.filesUploadV2({
+      initial_comment: `Results for week ${slackTeam.CurrentWeek} are in!`,
+      // title: `Results for week ${slackTeam.CurrentWeek}`,
       file: `${slackTeam.SlackTeamId}.png`,
       filename: `${slackTeam.SlackTeamId} ${new Date().toISOString()}.png`,
       channel_id: slackTeam.SlackReportChannelId
     });
-  }
 
-  //Post group selection/results if all results are in
+    await sqlClient.request()
+      .input('slackTeam', sql.NVarChar(sql.MAX), slackTeam.SlackTeamId)
+      .query(`UPDATE Config SET CurrentWeek = CurrentWeek + 1 WHERE SlackTeamId = @slackTeam`);
+  }
 };
 
 async function checkScores(){
@@ -760,4 +841,5 @@ app.action('channel_selection', async ({ack}) => {
     });
   }
   console.log('⚡️ Bolt app is running!');
+  // checkResults();
 })();
