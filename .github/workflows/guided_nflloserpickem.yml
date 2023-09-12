@@ -52,5 +52,5 @@ jobs:
         with:
           app-name: 'nflloserpickem'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_1183A73C91CC4C41ADCA7879F488AAF3 }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_58517CC539124E40A5042B9239CAF3F0 }}
           package: .
