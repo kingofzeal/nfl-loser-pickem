@@ -25,17 +25,13 @@
 - [ ] Write unit tests for all services
 
 ## Phase 4: Platform Adapters 🔲
-- [ ] Slack adapter implementation
+- [ ] Slack adapter implementation (PRIORITY)
   - [ ] Authentication
   - [ ] Command parsing
   - [ ] Message formatting (ephemeral, public)
   - [ ] DM support
-- [ ] Discord adapter implementation
-  - [ ] Authentication
-  - [ ] Command parsing
-  - [ ] Embed formatting
-  - [ ] DM support
 - [ ] Adapter integration tests
+- [ ] (Discord adapter - future phase)
 
 ## Phase 5: Data Ingestion 🔲
 - [ ] ESPN API client
@@ -56,7 +52,7 @@
 
 ## Phase 7: Render Service 🔲
 - [ ] Embed/block message generators
-- [ ] Weekly summary image generation (canvas)
+- [ ] Weekly summary image generation (canvas - server-side)
 - [ ] Color coding (wins/losses)
 - [ ] Player grid layout
 - [ ] Image upload/storage
@@ -81,12 +77,15 @@
 - [ ] CI/CD pipeline
 - [ ] Monitoring setup
 - [ ] Backup strategy
+- [ ] Archive/export automation
 - [ ] Production documentation
 
 ## Future Enhancements 💡
-- [ ] Multi-league support
+- [ ] Discord support
+- [ ] Multi-league support per workspace
+- [ ] Per-player reminder preferences & timezone overrides
 - [ ] Player statistics dashboard
-- [ ] Historical season archives
+- [ ] Historical season archives browser
 - [ ] Playoff mode
 - [ ] Custom scoring rules
 - [ ] Mobile notifications
@@ -100,6 +99,6 @@
 
 **Next Up:** Implement Database Layer (Phase 2)
 
-**Blockers:** None - awaiting decisions in DECISIONS.md
+**Blockers:** None - all decisions finalized in DECISIONS_FINALIZED.md
 
-**Questions:** See docs/DECISIONS.md for open questions
+**Questions:** All answered - see docs/DECISIONS_FINALIZED.md

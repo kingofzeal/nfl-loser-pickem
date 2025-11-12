@@ -46,6 +46,8 @@ export interface Workspace {
   announcement_channel_id: string | null;
   timezone: string;
   reminder_enabled: boolean;
+  reminder_friday_enabled: boolean;
+  reminder_sunday_enabled: boolean;
   created_at: Date;
 }
 
@@ -55,7 +57,7 @@ export interface Player {
   platform_user_id: string;
   display_name: string;
   is_admin: boolean;
-  timezone_override: string | null;
+  joined_week_id: number | null;
   created_at: Date;
 }
 

@@ -8,10 +8,12 @@ A workspace-scoped bot for running NFL "Loser Pick'em" leagues across Slack and 
 - Picks lock at the scheduled kickoff time
 - Players can change picks unlimited times before kickoff
 - No team may be picked more than once per season by the same player
+- Players cannot pick teams that don't play in a given week (bye weeks)
 - If picked team loses → player wins that week
-- If picked team wins or ties → player loses that week
-- No pick made → bot assigns random winning team not previously used → loss
+- If picked team wins or **ties** → player loses that week
+- No pick made → bot assigns random team that **won** that week (not previously used) → loss
 - Standings tracked as W–L record
+- Players can join mid-season with no penalties (only count weeks after joining)
 
 ## Tech Stack
 
@@ -109,6 +111,19 @@ npm run test:integration
 - [Architecture Overview](./docs/ARCHITECTURE.md)
 - [Database Schema](./docs/DATABASE.md)
 - [API Integration](./docs/DATA_SOURCES.md)
+- [Finalized Decisions](./docs/DECISIONS_FINALIZED.md)
+
+## Key Design Decisions
+
+- **Slack First:** Slack integration prioritized over Discord
+- **Workspace-Wide Reminders:** No per-player reminder preferences
+- **Mid-Season Joins Allowed:** Players can join anytime with no penalties for missed weeks
+- **Export & Archive:** Season data exported to JSON/CSV and purged after completion
+- **Ties Count as Losses:** Consistent with "pick to lose" mechanic
+- **Postponement Handling:** Picks automatically unlock if game kickoff time changes
+- **Image Generation:** Server-side canvas library (lightweight, serverless-friendly)
+
+See [DECISIONS_FINALIZED.md](./docs/DECISIONS_FINALIZED.md) for complete details.
 
 ## License
 

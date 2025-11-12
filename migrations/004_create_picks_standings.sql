@@ -69,3 +69,28 @@ CREATE TRIGGER trigger_no_repeat_teams
   BEFORE INSERT OR UPDATE ON picks
   FOR EACH ROW
   EXECUTE FUNCTION check_no_repeat_teams();
+
+-- Function to validate team plays in the week
+CREATE OR REPLACE FUNCTION check_team_plays_in_week()
+RETURNS TRIGGER AS $$
+DECLARE
+  game_count INTEGER;
+BEGIN
+  SELECT COUNT(*) INTO game_count
+  FROM games g
+  WHERE g.week_id = NEW.week_id
+    AND (g.home_team_id = NEW.team_id OR g.away_team_id = NEW.team_id)
+    AND g.status != 'cancelled';
+  
+  IF game_count = 0 THEN
+    RAISE EXCEPTION 'Team does not play in this week';
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_validate_team_plays
+  BEFORE INSERT OR UPDATE ON picks
+  FOR EACH ROW
+  EXECUTE FUNCTION check_team_plays_in_week();

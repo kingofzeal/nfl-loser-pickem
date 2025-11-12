@@ -121,7 +121,9 @@ Each Slack workspace or Discord server.
 | name | VARCHAR(255) | NOT NULL | Human-readable name |
 | announcement_channel_id | VARCHAR(100) | NULL | Where public posts go |
 | timezone | VARCHAR(50) | DEFAULT 'America/New_York' | Workspace timezone |
-| reminder_enabled | BOOLEAN | DEFAULT true | Send Friday/Sunday reminders |
+| reminder_enabled | BOOLEAN | DEFAULT true | Send reminders |
+| reminder_friday_enabled | BOOLEAN | DEFAULT true | Send Friday reminders |
+| reminder_sunday_enabled | BOOLEAN | DEFAULT true | Send Sunday reminders |
 | created_at | TIMESTAMP | DEFAULT NOW() | |
 
 **Constraints:**
@@ -142,7 +144,7 @@ Users within a workspace.
 | platform_user_id | VARCHAR(100) | NOT NULL | Slack user ID or Discord user ID |
 | display_name | VARCHAR(100) | NOT NULL | Display name |
 | is_admin | BOOLEAN | DEFAULT false | Admin privileges |
-| timezone_override | VARCHAR(50) | NULL | Player-specific timezone |
+| joined_week_id | INTEGER | NULL, FOREIGN KEY → weeks.week_id | Week when player joined (for mid-season joins) |
 | created_at | TIMESTAMP | DEFAULT NOW() | |
 
 **Constraints:**
@@ -231,11 +233,17 @@ Enforced via query: `SELECT team_id FROM picks WHERE player_id = ? AND week_id I
 ### One Pick Per Week
 Enforced by UNIQUE constraint on `(week_id, player_id)` in `picks` table.
 
+### Team Must Play in Week
+Enforced by trigger: `check_team_plays_in_week()` validates that the picked team has a game (not cancelled) in that week.
+
 ### Workspace Isolation
 All queries for workspace-scoped tables MUST filter by `workspace_id` or join through `players` table.
 
 ### Pick Locking
 Picks locked when `games.kickoff_time <= NOW()` for the game involving the picked team.
+
+### Pick Unlocking (Postponements)
+When a game is postponed and kickoff time updated, picks are automatically unlocked until the new kickoff time.
 
 ### Outcome Calculation
 When week finalized:
@@ -243,10 +251,13 @@ When week finalized:
 UPDATE picks SET outcome = 
   CASE 
     WHEN games.winner_team_id IS NOT NULL AND games.winner_team_id != picks.team_id THEN 'win'
-    ELSE 'loss'
+    ELSE 'loss'  -- Includes ties (winner_team_id IS NULL)
   END
 WHERE week_id = ?;
 ```
+
+### Mid-Season Joins
+Players can join mid-season. `joined_week_id` tracks when they joined. Standings only count weeks after join (no penalties for missed weeks).
 
 ---
 
@@ -261,7 +272,23 @@ Migrations stored in `migrations/` directory, numbered sequentially:
 - `006_add_indexes.sql`
 - `007_seed_teams.sql`
 
+- `006_add_indexes.sql`
+- `007_add_archive_tracking.sql`
+
 Use a migration tool like `node-pg-migrate` or `db-migrate`.
+
+---
+
+## Archive Strategy
+
+After a season completes, data can be exported and purged to keep the database lean:
+
+1. **Export season data** to JSON/CSV format
+2. **Purge workspace-specific data** (picks, standings, audit logs for that season)
+3. **Keep global data** (teams, seasons, weeks, games for reference)
+4. **Store exports** in `./archives/` directory or S3
+
+This keeps the active database small while preserving historical records.
 
 ---
 

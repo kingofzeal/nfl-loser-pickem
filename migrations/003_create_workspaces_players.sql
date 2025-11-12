@@ -7,6 +7,8 @@ CREATE TABLE workspaces (
   announcement_channel_id VARCHAR(100) NULL,
   timezone VARCHAR(50) DEFAULT 'America/New_York' NOT NULL,
   reminder_enabled BOOLEAN DEFAULT true NOT NULL,
+  reminder_friday_enabled BOOLEAN DEFAULT true NOT NULL,
+  reminder_sunday_enabled BOOLEAN DEFAULT true NOT NULL,
   created_at TIMESTAMP DEFAULT NOW() NOT NULL,
   UNIQUE (platform, platform_workspace_id)
 );
@@ -20,7 +22,7 @@ CREATE TABLE players (
   platform_user_id VARCHAR(100) NOT NULL,
   display_name VARCHAR(100) NOT NULL,
   is_admin BOOLEAN DEFAULT false NOT NULL,
-  timezone_override VARCHAR(50) NULL,
+  joined_week_id INTEGER NULL REFERENCES weeks(week_id),
   created_at TIMESTAMP DEFAULT NOW() NOT NULL,
   UNIQUE (workspace_id, platform_user_id)
 );

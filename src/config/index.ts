@@ -45,6 +45,7 @@ export const config = {
     weekOpenCron: process.env.WEEK_OPEN_CRON || '0 9 * * 2', // Tuesday 9am
     reminderFridayCron: process.env.REMINDER_FRIDAY_CRON || '0 10 * * 5', // Friday 10am
     reminderSundayCron: process.env.REMINDER_SUNDAY_CRON || '0 9 * * 0', // Sunday 9am
+    syncGamesCron: process.env.SYNC_GAMES_CRON || '0 * * * *', // Hourly
   },
 
   // Server
@@ -62,6 +63,13 @@ export const config = {
   images: {
     outputPath: process.env.IMAGE_OUTPUT_PATH || './public/images',
     baseUrl: process.env.IMAGE_BASE_URL || 'http://localhost:3000/images',
+  },
+
+  // Archive
+  archive: {
+    enabled: process.env.ARCHIVE_ENABLED === 'true',
+    exportPath: process.env.ARCHIVE_EXPORT_PATH || './archives',
+    autoArchiveAfterDays: parseInt(process.env.ARCHIVE_AUTO_AFTER_DAYS || '90'),
   },
 };
 
