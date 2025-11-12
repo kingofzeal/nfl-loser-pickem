@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 22+ (LTS recommended)
 - PostgreSQL 14+
 - Slack or Discord bot credentials
 - Domain/hosting for webhooks (if not using websockets)
@@ -70,7 +70,7 @@
    ```
 
 3. **Create Lambda Function**
-   - Runtime: Node.js 18
+   - Runtime: Node.js 22.x
    - Upload function.zip
    - Set environment variables
    - Configure VPC access to RDS

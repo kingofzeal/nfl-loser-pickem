@@ -103,6 +103,12 @@ This document records all finalized design decisions for the NFL Loser Pick'em B
 
 ## Technical Implementation
 
+### ✅ Node.js Version
+**Decision:** **Node.js 22 LTS**
+- Long-term support until April 2027
+- Better performance and modern features
+- Excellent serverless compatibility
+
 ### ✅ Platform Priority
 **Decision:** **Slack first**, then Discord
 - Slack more common in workplaces

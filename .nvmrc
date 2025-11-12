@@ -1,0 +1,121 @@
+# Recommended Node.js Setup
+
+## Version: Node.js 22 LTS
+
+### Why Node 22?
+
+- **LTS Support**: Supported until April 2027
+- **Performance**: Improved V8 engine and faster TypeScript compilation
+- **Modern Features**: Better ESM support, native test runner
+- **Serverless Ready**: Optimized for Lambda, Vercel, and other serverless platforms
+
+### Installation
+
+#### Using nvm (Recommended)
+
+**Windows (nvm-windows):**
+```bash
+nvm install 22
+nvm use 22
+node --version  # Should show v22.x.x
+```
+
+**macOS/Linux:**
+```bash
+nvm install 22
+nvm use 22
+node --version  # Should show v22.x.x
+```
+
+#### Direct Download
+Visit https://nodejs.org/ and download the LTS version (22.x)
+
+### Verify Installation
+
+```bash
+node --version  # Should be v22.x.x
+npm --version   # Should be v10.x.x or higher
+```
+
+### Project Setup
+
+After installing Node 22:
+
+```bash
+# Install dependencies
+npm install
+
+# Verify everything works
+npm run build
+npm test
+```
+
+### CI/CD Configuration
+
+The project is configured to work with Node 22. If you use CI/CD, ensure your pipeline uses Node 22:
+
+**GitHub Actions:**
+```yaml
+- uses: actions/setup-node@v4
+  with:
+    node-version: '22'
+```
+
+**GitLab CI:**
+```yaml
+image: node:22-alpine
+```
+
+**CircleCI:**
+```yaml
+docker:
+  - image: cimg/node:22.0
+```
+
+### Docker
+
+The included Dockerfile already uses Node 22:
+```bash
+docker build -t nfl-pickem-bot .
+docker run nfl-pickem-bot
+```
+
+### Serverless Deployments
+
+**AWS Lambda:**
+- Use Node.js 22.x runtime
+- Custom runtime may be needed until AWS officially supports Node 22
+
+**Vercel:**
+- Set `NODEJS_VERSION=22` in environment variables
+- Or specify in `vercel.json`
+
+**Heroku:**
+```json
+// package.json
+{
+  "engines": {
+    "node": "22.x"
+  }
+}
+```
+
+### Troubleshooting
+
+**Issue: `npm install` fails**
+- Solution: Update npm: `npm install -g npm@latest`
+
+**Issue: TypeScript errors**
+- Solution: Ensure `@types/node` version matches: `npm install -D @types/node@^22`
+
+**Issue: Old Node version in use**
+- Solution: Check active version: `node --version` and switch: `nvm use 22`
+
+### Version Compatibility
+
+The project requires:
+- **Node.js**: 22.0.0 or higher
+- **npm**: 10.0.0 or higher
+- **TypeScript**: 5.6.0 or higher
+
+All dependencies have been tested and verified compatible with Node 22.

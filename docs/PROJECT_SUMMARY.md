@@ -191,6 +191,7 @@ npm run test:integration # Integration tests only
 
 ## 📦 Key Dependencies
 
+- **Runtime**: Node.js 22 LTS
 - **@slack/bolt** - Slack bot framework
 - **discord.js** - Discord bot framework
 - **pg** - PostgreSQL client

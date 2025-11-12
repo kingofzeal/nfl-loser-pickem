@@ -17,7 +17,7 @@ A workspace-scoped bot for running NFL "Loser Pick'em" leagues across Slack and 
 
 ## Tech Stack
 
-- **Runtime**: Node.js 18+
+- **Runtime**: Node.js 22 LTS
 - **Language**: TypeScript
 - **Database**: PostgreSQL (with migration support)
 - **Bot Platforms**: Slack & Discord (modular adapter pattern)
@@ -47,7 +47,7 @@ docs/                # Additional documentation
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+ (LTS recommended)
 - PostgreSQL 14+
 - Slack or Discord bot token
 
