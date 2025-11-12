@@ -1,4 +1,4 @@
-import { CommandContext, CommandResponse } from '../types';
+import { CommandContext, CommandResponse } from '../../types';
 
 /**
  * Base command handler interface

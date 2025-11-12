@@ -1,4 +1,4 @@
-import { Standing, StandingWithPlayer } from '../types';
+import { Standing, StandingWithPlayer } from '../../types';
 
 export interface IStandingsService {
   /**

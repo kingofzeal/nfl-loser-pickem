@@ -1,7 +1,7 @@
 import { Pool, PoolClient } from 'pg';
 import { 
   Team, Season, Week, Game, Workspace, Player, Pick, Standing, AuditLog 
-} from '../types';
+} from '../../types';
 
 export interface IDatabase {
   query<T = any>(text: string, params?: any[]): Promise<T[]>;

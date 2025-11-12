@@ -41,8 +41,15 @@ export class MyCommandHandler implements ICommandHandler {
     let standing = await this.standingsService.getPlayerRecord(context.player_id, seasonId);
     
     if (!standing) {
+      // Get current week to track when player joined
+      const currentWeek = await this.db.query<any>(
+        'SELECT week_id FROM weeks WHERE season_id = $1 AND state IN ($2, $3) ORDER BY week_number LIMIT 1',
+        [seasonId, 'open', 'in_progress']
+      );
+      const joinedWeekId = currentWeek.length > 0 ? currentWeek[0].week_id : null;
+      
       // Initialize standing if not exists
-      standing = await this.standingsService.initializeStanding(context.player_id, seasonId);
+      standing = await this.standingsService.initializeStanding(context.player_id, seasonId, joinedWeekId);
     }
 
     // Enrich picks with team and week data
@@ -52,8 +59,8 @@ export class MyCommandHandler implements ICommandHandler {
         const week = await this.db.weeks.findById(pick.week_id);
         return {
           ...pick,
-          team,
-          week
+          team: team || undefined,
+          week: week || undefined
         };
       })
     );

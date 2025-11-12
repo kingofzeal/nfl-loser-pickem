@@ -1,4 +1,4 @@
-import { Pick, Player, Team, ValidationResult } from '../types';
+import { Pick, Player, Team, ValidationResult } from '../../types';
 
 export interface IPickService {
   /**

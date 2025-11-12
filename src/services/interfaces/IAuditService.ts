@@ -1,4 +1,4 @@
-import { AuditLog } from '../types';
+import { AuditLog } from '../../types';
 
 export interface IAuditService {
   /**

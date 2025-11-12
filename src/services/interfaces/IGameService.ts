@@ -1,4 +1,4 @@
-import { Game, GameWithTeams } from '../types';
+import { Game, GameWithTeams } from '../../types';
 
 export interface IGameService {
   /**

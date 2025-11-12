@@ -1,4 +1,4 @@
-import { EmbedMessage, Pick, Standing, StandingWithPlayer, Week, PickWithDetails } from '../types';
+import { EmbedMessage, Pick, Standing, StandingWithPlayer, Week, PickWithDetails } from '../../types';
 
 export interface IRenderService {
   /**
