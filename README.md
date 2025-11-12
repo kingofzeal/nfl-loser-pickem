@@ -57,6 +57,11 @@ docs/                # Additional documentation
 npm install
 ```
 
+**Note:** The `canvas` package is optional and requires native compilation (Python + build tools on Windows). If installation fails, the bot will function without image generation. See `docs/ROADMAP.md` for alternative image generation solutions being evaluated.
+
+### Environment Setup
+```
+
 ### Database Setup
 
 ```bash

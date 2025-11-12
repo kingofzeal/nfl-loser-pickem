@@ -52,7 +52,9 @@
 
 ## Phase 7: Render Service 🔲
 - [ ] Embed/block message generators
-- [ ] Weekly summary image generation (canvas - server-side)
+- [ ] Weekly summary image generation
+  - [ ] **REVIEW:** Evaluate alternatives to canvas (Cloudinary, Puppeteer, sharp, etc.)
+  - [ ] Note: canvas currently optional dependency due to Windows native build requirements
 - [ ] Color coding (wins/losses)
 - [ ] Player grid layout
 - [ ] Image upload/storage
@@ -84,6 +86,7 @@
 - [ ] Discord support
 - [ ] Multi-league support per workspace
 - [ ] Per-player reminder preferences & timezone overrides
+- [ ] Image generation service decision (evaluate canvas alternatives)
 - [ ] Player statistics dashboard
 - [ ] Historical season archives browser
 - [ ] Playoff mode

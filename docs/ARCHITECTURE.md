@@ -164,7 +164,7 @@ The NFL Loser Pick'em Bot follows a layered architecture with clear separation o
 - Workspace-wide reminders only (no per-player preferences)
 - One league per workspace
 - Slack platform priority
-- Canvas for image generation (lightweight, serverless-friendly)
+- Image generation: **Canvas optional** (Windows build issues; evaluating alternatives like Cloudinary, Puppeteer, sharp)
 
 ### Mid-Season Flexibility
 - Players can join anytime
