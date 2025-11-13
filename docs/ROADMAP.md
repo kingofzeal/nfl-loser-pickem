@@ -31,14 +31,16 @@
 - [x] Command routing and context wiring
 - [x] Platform-specific response formatting
 
-## Phase 5: Data Ingestion ⏳ (Partial)
-- [x] ESPN API client (GameService)
-- [x] Team mapping utilities
+## Phase 5: Data Ingestion ✅
+- [x] ESPN API client implementation with retry logic
+- [x] Data provider adapter pattern (ESPN + TheSportsDB support)
+- [x] Team mapping utilities (ESPN IDs and abbreviations)
 - [x] Schedule seeding
-- [ ] Live score polling
-- [ ] Error handling and retries
-- [ ] Data normalization
-- [ ] Integration tests with fixtures
+- [x] Live score polling with exponential backoff retry
+- [x] Error handling and graceful degradation
+- [x] Data normalization and validation (status, scores, dates)
+- [x] Integration tests structure (date handling refinement pending)
+- [x] Comprehensive documentation in DATA_INGESTION.md
 
 ## Phase 6: Scheduler ✅
 - [x] Week open automation
@@ -101,7 +103,7 @@
 
 ## Current Focus
 
-**Next Up:** Integration & Testing (end-to-end, load, security) and Command Router
+**Next Up:** Command Router (Phase 8) and Integration & Testing (Phase 9)
 
 **Blockers:** None - all decisions finalized in DECISIONS_FINALIZED.md
 

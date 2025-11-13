@@ -17,11 +17,91 @@ import { logger } from '../utils/logger';
 
 export class GameService implements IGameService {
   private readonly ESPN_API_BASE = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
+  private readonly MAX_RETRIES = 3;
+  private readonly RETRY_DELAY_MS = 1000;
+  private readonly REQUEST_TIMEOUT_MS = 10000;
 
   constructor(
     private db: IDatabase,
     private auditService: IAuditService
   ) {}
+
+  /**
+   * Fetch with retry and timeout
+   */
+  private async fetchWithRetry(url: string, retries = this.MAX_RETRIES): Promise<Response> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        logger.debug('Fetching ESPN data', { url, attempt });
+
+        // Create abort controller for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT_MS);
+
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          return response;
+        }
+
+        // Handle rate limiting
+        if (response.status === 429) {
+          const retryAfter = response.headers.get('Retry-After');
+          const delayMs = retryAfter ? parseInt(retryAfter) * 1000 : this.RETRY_DELAY_MS * Math.pow(2, attempt);
+          
+          logger.warn('Rate limited by ESPN API', { 
+            attempt, 
+            retryAfter: delayMs,
+            status: response.status,
+          });
+
+          if (attempt < retries) {
+            await this.sleep(delayMs);
+            continue;
+          }
+        }
+
+        // Handle server errors (5xx)
+        if (response.status >= 500) {
+          logger.warn('ESPN API server error', { 
+            attempt, 
+            status: response.status,
+            statusText: response.statusText,
+          });
+
+          if (attempt < retries) {
+            await this.sleep(this.RETRY_DELAY_MS * Math.pow(2, attempt));
+            continue;
+          }
+        }
+
+        // Client error (4xx) - don't retry
+        throw new Error(`ESPN API request failed: ${response.status} ${response.statusText}`);
+      } catch (error: any) {
+        if (error.name === 'AbortError') {
+          logger.warn('ESPN API request timed out', { attempt, timeout: this.REQUEST_TIMEOUT_MS });
+        } else {
+          logger.warn('ESPN API request error', { attempt, error: error.message });
+        }
+
+        if (attempt === retries) {
+          throw error;
+        }
+
+        await this.sleep(this.RETRY_DELAY_MS * Math.pow(2, attempt));
+      }
+    }
+
+    throw new Error('ESPN API request failed after all retries');
+  }
+
+  /**
+   * Sleep utility for retry delays
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
 
   /**
    * Sync games from ESPN API for a specific week
@@ -40,15 +120,11 @@ export class GameService implements IGameService {
         throw new Error('Current season not found');
       }
 
-      // Fetch scoreboard from ESPN
+      // Fetch scoreboard from ESPN with retry
       const url = `${this.ESPN_API_BASE}?week=${week.week_number}&seasontype=2&limit=100`;
       logger.debug('Fetching ESPN scoreboard', { url });
 
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`ESPN API request failed: ${response.statusText}`);
-      }
-
+      const response = await this.fetchWithRetry(url);
       const data: ESPNScoreboardResponse = await response.json();
 
       logger.info('ESPN data fetched', { 
@@ -56,15 +132,58 @@ export class GameService implements IGameService {
         games: data.events.length,
       });
 
+      // Validate response structure
+      if (!data.events || !Array.isArray(data.events)) {
+        logger.error('Invalid ESPN API response structure', { data });
+        throw new Error('Invalid ESPN API response: missing or invalid events array');
+      }
+
       // Process each game
+      let successCount = 0;
+      let errorCount = 0;
+
       for (const espnGame of data.events) {
-        await this.processESPNGame(espnGame, weekId);
+        try {
+          await this.processESPNGame(espnGame, weekId);
+          successCount++;
+        } catch (error) {
+          errorCount++;
+          logger.error('Failed to process individual game', { 
+            error, 
+            gameId: espnGame?.id,
+          });
+          // Continue processing other games
+        }
       }
 
       logger.info('Games synced', { 
         week_id: weekId,
-        games_processed: data.events.length,
+        total: data.events.length,
+        success: successCount,
+        errors: errorCount,
       });
+
+      // Log audit entry for sync
+      const workspaces = await this.db.workspaces.findAll();
+      for (const workspace of workspaces) {
+        await this.auditService.log({
+          workspace_id: workspace.workspace_id,
+          actor_type: 'system',
+          action: 'games_synced',
+          entity_type: 'week',
+          entity_id: weekId,
+          payload: {
+            total: data.events.length,
+            success: successCount,
+            errors: errorCount,
+          },
+        });
+      }
+
+      // If all games failed, throw error
+      if (errorCount > 0 && successCount === 0) {
+        throw new Error('All games failed to sync');
+      }
     } catch (error) {
       logger.error('Failed to sync games', { error, weekId });
       throw new Error(`Failed to sync games: ${error}`);
@@ -75,12 +194,24 @@ export class GameService implements IGameService {
    * Process a single ESPN game and update/create in database
    */
   private async processESPNGame(espnGame: any, weekId: number): Promise<void> {
+    // Validate game structure
+    if (!espnGame || !espnGame.id) {
+      logger.warn('Invalid ESPN game: missing id', { espnGame });
+      throw new Error('Invalid ESPN game: missing id');
+    }
+
     try {
       // Extract competition (first one, should only be one for NFL games)
       const competition = espnGame.competitions?.[0];
       if (!competition) {
         logger.warn('No competition data in ESPN game', { gameId: espnGame.id });
-        return;
+        throw new Error('No competition data in ESPN game');
+      }
+
+      // Validate competitors array
+      if (!competition.competitors || !Array.isArray(competition.competitors)) {
+        logger.warn('Invalid competitors data in ESPN game', { gameId: espnGame.id });
+        throw new Error('Invalid competitors data');
       }
 
       // Get home and away teams
@@ -89,7 +220,13 @@ export class GameService implements IGameService {
 
       if (!homeCompetitor || !awayCompetitor) {
         logger.warn('Missing competitors in ESPN game', { gameId: espnGame.id });
-        return;
+        throw new Error('Missing home or away competitor');
+      }
+
+      // Validate team data
+      if (!homeCompetitor.team?.id || !awayCompetitor.team?.id) {
+        logger.warn('Missing team IDs in ESPN game', { gameId: espnGame.id });
+        throw new Error('Missing team IDs');
       }
 
       // Map ESPN team IDs to internal slugs
@@ -102,7 +239,7 @@ export class GameService implements IGameService {
           homeTeamId: homeCompetitor.team.id,
           awayTeamId: awayCompetitor.team.id,
         });
-        return;
+        throw new Error(`Unknown team IDs: ${homeCompetitor.team.id}, ${awayCompetitor.team.id}`);
       }
 
       // Find internal team IDs
@@ -114,16 +251,57 @@ export class GameService implements IGameService {
           homeSlug,
           awaySlug,
         });
-        return;
+        throw new Error(`Teams not found in database: ${homeSlug}, ${awaySlug}`);
       }
 
-      // Parse game status
-      const status = this.mapESPNStatus(espnGame.status.type.name);
-      const kickoffTime = new Date(espnGame.date);
+      // Validate and parse game status
+      if (!espnGame.status?.type?.name) {
+        logger.warn('Missing status in ESPN game', { gameId: espnGame.id });
+        throw new Error('Missing game status');
+      }
 
-      // Parse scores
-      const homeScore = homeCompetitor.score ? parseInt(homeCompetitor.score, 10) : null;
-      const awayScore = awayCompetitor.score ? parseInt(awayCompetitor.score, 10) : null;
+      const status = this.mapESPNStatus(espnGame.status.type.name);
+
+      // Validate and parse kickoff time
+      if (!espnGame.date) {
+        logger.warn('Missing date in ESPN game', { gameId: espnGame.id });
+        throw new Error('Missing game date');
+      }
+
+      const kickoffTime = new Date(espnGame.date);
+      if (isNaN(kickoffTime.getTime())) {
+        logger.warn('Invalid date in ESPN game', { 
+          gameId: espnGame.id,
+          date: espnGame.date,
+        });
+        throw new Error(`Invalid game date: ${espnGame.date}`);
+      }
+
+      // Parse scores (with validation)
+      let homeScore: number | null = null;
+      let awayScore: number | null = null;
+
+      if (homeCompetitor.score) {
+        homeScore = parseInt(homeCompetitor.score, 10);
+        if (isNaN(homeScore) || homeScore < 0) {
+          logger.warn('Invalid home score', { 
+            gameId: espnGame.id, 
+            score: homeCompetitor.score,
+          });
+          homeScore = null;
+        }
+      }
+
+      if (awayCompetitor.score) {
+        awayScore = parseInt(awayCompetitor.score, 10);
+        if (isNaN(awayScore) || awayScore < 0) {
+          logger.warn('Invalid away score', { 
+            gameId: espnGame.id, 
+            score: awayCompetitor.score,
+          });
+          awayScore = null;
+        }
+      }
 
       // Determine winner
       let winnerTeamId: number | null = null;
@@ -177,7 +355,7 @@ export class GameService implements IGameService {
       }
     } catch (error) {
       logger.error('Failed to process ESPN game', { error, gameId: espnGame.id });
-      // Don't throw - continue processing other games
+      throw error; // Re-throw to be caught by syncGames
     }
   }
 
