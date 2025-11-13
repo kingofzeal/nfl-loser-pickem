@@ -105,12 +105,10 @@ export class AdminCommandHandler implements ICommandHandler {
     }
 
     // Get active season
-    const activeSeason = await this.db.query<any>(
-      'SELECT * FROM seasons WHERE state = $1 ORDER BY year DESC LIMIT 1',
-      ['active']
-    );
+    const currentYear = new Date().getFullYear();
+    const season = await this.db.seasons.findByYear(currentYear);
     
-    if (activeSeason.length === 0) {
+    if (!season || season.state !== 'active') {
       return {
         type: 'ephemeral',
         content: this.renderService.generateError('No active season found.')
@@ -118,7 +116,7 @@ export class AdminCommandHandler implements ICommandHandler {
     }
 
     const week = await this.db.weeks.findBySeasonAndNumber(
-      activeSeason[0].season_id,
+      season.season_id,
       weekNumber
     );
 
@@ -154,12 +152,10 @@ export class AdminCommandHandler implements ICommandHandler {
     }
 
     // Get active season
-    const activeSeason = await this.db.query<any>(
-      'SELECT * FROM seasons WHERE state = $1 ORDER BY year DESC LIMIT 1',
-      ['active']
-    );
+    const currentYear = new Date().getFullYear();
+    const season = await this.db.seasons.findByYear(currentYear);
     
-    if (activeSeason.length === 0) {
+    if (!season || season.state !== 'active') {
       return {
         type: 'ephemeral',
         content: this.renderService.generateError('No active season found.')
@@ -167,7 +163,7 @@ export class AdminCommandHandler implements ICommandHandler {
     }
 
     const week = await this.db.weeks.findBySeasonAndNumber(
-      activeSeason[0].season_id,
+      season.season_id,
       weekNumber
     );
 
@@ -203,10 +199,65 @@ export class AdminCommandHandler implements ICommandHandler {
   }
 
   private async sync(context: CommandContext, args: string[]): Promise<CommandResponse> {
-    // TODO: Implement manual sync
+    // Get current active season
+    const currentYear = new Date().getFullYear();
+    const season = await this.db.seasons.findByYear(currentYear);
+    
+    if (!season) {
+      return {
+        type: 'ephemeral',
+        content: this.renderService.generateError('No season found for current year.')
+      };
+    }
+
+    // If week number provided, sync that week only
+    if (args.length > 0) {
+      const weekNumber = parseInt(args[0]);
+      if (isNaN(weekNumber)) {
+        return {
+          type: 'ephemeral',
+          content: this.renderService.generateError('Invalid week number.')
+        };
+      }
+
+      const week = await this.db.weeks.findBySeasonAndNumber(season.season_id, weekNumber);
+      if (!week) {
+        return {
+          type: 'ephemeral',
+          content: this.renderService.generateError(`Week ${weekNumber} not found.`)
+        };
+      }
+
+      await this.gameService.syncGames(week.week_id);
+
+      return {
+        type: 'ephemeral',
+        content: { 
+          title: '✅ Sync Complete', 
+          description: `Games for Week ${weekNumber} have been synced from ESPN.`
+        }
+      };
+    }
+
+    // Otherwise sync current week
+    const weeks = await this.db.weeks.findBySeason(season.season_id);
+    const currentWeek = weeks.find(w => w.state === 'open' || w.state === 'in_progress');
+    
+    if (!currentWeek) {
+      return {
+        type: 'ephemeral',
+        content: this.renderService.generateError('No active week found to sync.')
+      };
+    }
+
+    await this.gameService.syncGames(currentWeek.week_id);
+
     return {
       type: 'ephemeral',
-      content: this.renderService.generateError('Manual sync not yet implemented.')
+      content: { 
+        title: '✅ Sync Complete', 
+        description: `Games for Week ${currentWeek.week_number} have been synced from ESPN.`
+      }
     };
   }
 

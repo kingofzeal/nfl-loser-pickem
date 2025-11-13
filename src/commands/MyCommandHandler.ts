@@ -1,6 +1,7 @@
 import { ICommandHandler } from './interfaces/ICommandHandler';
 import { CommandContext, CommandResponse } from '../types';
 import { IStandingsService } from '../services/interfaces/IStandingsService';
+import { IWeekService } from '../services/interfaces/IWeekService';
 import { IRenderService } from '../services/interfaces/IRenderService';
 import { IDatabase } from '../services/interfaces/IDatabase';
 
@@ -10,6 +11,7 @@ import { IDatabase } from '../services/interfaces/IDatabase';
 export class MyCommandHandler implements ICommandHandler {
   constructor(
     private standingsService: IStandingsService,
+    private weekService: IWeekService,
     private renderService: IRenderService,
     private db: IDatabase
   ) {}
@@ -20,19 +22,17 @@ export class MyCommandHandler implements ICommandHandler {
 
   async execute(context: CommandContext, args: string[]): Promise<CommandResponse> {
     // Get active season
-    const activeSeason = await this.db.query<any>(
-      'SELECT * FROM seasons WHERE state = $1 ORDER BY year DESC LIMIT 1',
-      ['active']
-    );
+    const currentYear = new Date().getFullYear();
+    const season = await this.db.seasons.findByYear(currentYear);
     
-    if (activeSeason.length === 0) {
+    if (!season || season.state !== 'active') {
       return {
         type: 'ephemeral',
         content: this.renderService.generateError('No active season found.')
       };
     }
 
-    const seasonId = activeSeason[0].season_id;
+    const seasonId = season.season_id;
 
     // Get player's picks for the season
     const picks = await this.db.picks.findBySeason(seasonId, context.player_id);
@@ -42,14 +42,15 @@ export class MyCommandHandler implements ICommandHandler {
     
     if (!standing) {
       // Get current week to track when player joined
-      const currentWeek = await this.db.query<any>(
-        'SELECT week_id FROM weeks WHERE season_id = $1 AND state IN ($2, $3) ORDER BY week_number LIMIT 1',
-        [seasonId, 'open', 'in_progress']
-      );
-      const joinedWeekId = currentWeek.length > 0 ? currentWeek[0].week_id : null;
+      const currentWeek = await this.weekService.getCurrentWeek(seasonId);
+      const joinedWeekId = currentWeek ? currentWeek.week_id : 1;
       
       // Initialize standing if not exists
-      standing = await this.standingsService.initializeStanding(context.player_id, seasonId, joinedWeekId);
+      standing = await this.standingsService.initializeStanding(
+        context.player_id, 
+        seasonId, 
+        joinedWeekId
+      );
     }
 
     // Enrich picks with team and week data
