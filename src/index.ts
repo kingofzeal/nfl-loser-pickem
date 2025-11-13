@@ -19,7 +19,9 @@ import {
   StandingsService,
   GameService,
   RenderService,
-  SchedulerService
+  SchedulerService,
+  ESPNDataProvider,
+  TheSportsDBProvider,
 } from './services';
 
 // Command handlers
@@ -33,12 +35,17 @@ import { CommandContext } from './types';
 /**
  * Initialize services with database
  */
-function createServices(db: Database) {
+function createServices(db: Database, env?: Env) {
   const auditService = new AuditService(db);
   const pickService = new PickService(db, auditService);
   const weekService = new WeekService(db, auditService, pickService);
   const standingsService = new StandingsService(db, auditService);
-  const gameService = new GameService(db, auditService);
+  // Select data provider based on environment
+  const providerName = (env?.DATA_SOURCE || 'espn').toLowerCase();
+  const provider = providerName === 'thesportsdb'
+    ? new TheSportsDBProvider(env?.THESPORTSDB_API_KEY)
+    : new ESPNDataProvider();
+  const gameService = new GameService(db, auditService, provider);
   const renderService = new RenderService();
   const schedulerService = new SchedulerService(db, weekService, gameService);
 
@@ -133,7 +140,7 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     try {
       const db = new Database(getD1Database(env));
-      const services = createServices(db);
+      const services = createServices(db, env);
       
       logger.info('Cron trigger started', {
         cron: event.cron,
@@ -293,7 +300,7 @@ function hexToBytes(hex: string): Uint8Array {
 async function processDiscordCommand(interaction: any, env: Env): Promise<void> {
   try {
     const db = new Database(getD1Database(env));
-    const services = createServices(db);
+    const services = createServices(db, env);
     const handlers = createCommandHandlers(services);
     
     // Extract command name and options

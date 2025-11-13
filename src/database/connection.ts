@@ -23,6 +23,8 @@ export interface Env {
   DISCORD_PUBLIC_KEY: string;
   DISCORD_APPLICATION_ID: string;
   ESPN_API_KEY?: string;
+  DATA_SOURCE?: string;
+  THESPORTSDB_API_KEY?: string;
   ENVIRONMENT: string;
   LOG_LEVEL: string;
 }

@@ -7,6 +7,7 @@
 import { SchedulerService } from '../../src/services/SchedulerService';
 import { WeekService } from '../../src/services/WeekService';
 import { GameService } from '../../src/services/GameService';
+import { ESPNDataProvider } from '../../src/services/providers/ESPNDataProvider';
 import { AuditService } from '../../src/services/AuditService';
 import { PickService } from '../../src/services/PickService';
 import { Database } from '../../src/database/Database';
@@ -122,7 +123,7 @@ describe('SchedulerService Integration Tests', () => {
     const auditService = new AuditService(db);
     const pickService = new PickService(db, auditService);
     weekService = new WeekService(db, auditService, pickService);
-    gameService = new GameService(db, auditService);
+  gameService = new GameService(db, auditService, new ESPNDataProvider());
     schedulerService = new SchedulerService(db, weekService, gameService);
   });
 

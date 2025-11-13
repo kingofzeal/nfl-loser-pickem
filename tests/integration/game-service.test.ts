@@ -7,6 +7,7 @@
 
 import BetterSqlite3 from 'better-sqlite3';
 import { GameService } from '../../src/services/GameService';
+import { ESPNDataProvider } from '../../src/services/providers/ESPNDataProvider';
 import { AuditService } from '../../src/services/AuditService';
 import { Database as AppDatabase } from '../../src/database/Database';
 import { readFileSync } from 'fs';
@@ -157,8 +158,8 @@ describe('GameService Integration Tests', () => {
     }
 
     // Initialize services
-    auditService = new AuditService(db);
-    gameService = new GameService(db, auditService);
+  auditService = new AuditService(db);
+  gameService = new GameService(db, auditService, new ESPNDataProvider());
 
     // Note: Teams are already seeded by 0001_create_teams.sql migration
   });

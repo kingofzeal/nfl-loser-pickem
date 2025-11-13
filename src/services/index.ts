@@ -23,3 +23,8 @@ export * from './interfaces/IArchiveService';
 export * from './interfaces/IRenderService';
 export * from './interfaces/IDatabase';
 export * from './interfaces/ISchedulerService';
+
+// Data provider interface and implementations
+export * from './interfaces/IDataProvider';
+export { ESPNDataProvider } from './providers/ESPNDataProvider';
+export { TheSportsDBProvider } from './providers/TheSportsDBProvider';
