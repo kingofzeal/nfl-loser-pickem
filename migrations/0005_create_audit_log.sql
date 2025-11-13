@@ -1,14 +1,17 @@
 -- Create audit_log table (workspace-scoped)
+--
+-- Note: payload is stored as TEXT (use JSON.parse/JSON.stringify in application)
+
 CREATE TABLE audit_log (
-  log_id SERIAL PRIMARY KEY,
+  log_id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
-  actor_type VARCHAR(20) NOT NULL CHECK (actor_type IN ('player', 'admin', 'system')),
+  actor_type TEXT NOT NULL CHECK (actor_type IN ('player', 'admin', 'system')),
   actor_id INTEGER NULL,
-  action VARCHAR(50) NOT NULL,
-  entity_type VARCHAR(50) NULL,
+  action TEXT NOT NULL,
+  entity_type TEXT NULL,
   entity_id INTEGER NULL,
-  payload JSONB NULL,
-  created_at TIMESTAMP DEFAULT NOW() NOT NULL
+  payload TEXT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX idx_audit_workspace ON audit_log(workspace_id);

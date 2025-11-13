@@ -1,2 +1,3 @@
+// Database exports (Cloudflare D1)
 export { Database } from './Database';
-export { getPool, testConnection, closePool, query } from './connection';
+export { getD1Database, testConnection, Env } from './connection';

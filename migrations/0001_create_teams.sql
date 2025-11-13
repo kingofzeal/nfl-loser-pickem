@@ -1,10 +1,12 @@
+-- Create teams table (uses SQLite/Cloudflare D1)
+
 -- Create teams table (global, shared across all workspaces)
 CREATE TABLE teams (
-  team_id SERIAL PRIMARY KEY,
-  slug VARCHAR(10) UNIQUE NOT NULL,
-  name VARCHAR(100) NOT NULL,
-  conference VARCHAR(3) NOT NULL CHECK (conference IN ('AFC', 'NFC')),
-  division VARCHAR(10) NOT NULL CHECK (division IN ('North', 'South', 'East', 'West'))
+  team_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  conference TEXT NOT NULL CHECK (conference IN ('AFC', 'NFC')),
+  division TEXT NOT NULL CHECK (division IN ('North', 'South', 'East', 'West'))
 );
 
 -- Create index on slug for fast lookups

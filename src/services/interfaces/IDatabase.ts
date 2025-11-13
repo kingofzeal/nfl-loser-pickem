@@ -1,11 +1,18 @@
-import { Pool, PoolClient } from 'pg';
 import { 
   Team, Season, Week, Game, Workspace, Player, Pick, Standing, AuditLog 
 } from '../../types';
 
+/**
+ * Generic transaction client interface
+ * Can be PostgreSQL PoolClient or D1 batch collector
+ */
+export interface ITransactionClient {
+  query<T = any>(text: string, params?: any[]): Promise<T[]>;
+}
+
 export interface IDatabase {
   query<T = any>(text: string, params?: any[]): Promise<T[]>;
-  transaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T>;
+  transaction<T>(callback: (client: ITransactionClient) => Promise<T>): Promise<T>;
   
   // Team operations
   teams: {

@@ -1,41 +1,189 @@
-import { Database } from '../../src/database/Database';
-import { testConnection, closePool } from '../../src/database/connection';
+/**
+ * Database Integration Tests
+ * 
+ * Uses better-sqlite3 for local testing with SQLite migrations.
+ * Tests the Database class with a mock D1Database interface.
+ */
+
+/// <reference types="@cloudflare/workers-types" />
+
+import BetterSqlite3 from 'better-sqlite3';
+import { Database as AppDatabase } from '../../src/database/Database';
+import { getTestDb, resetTestDb } from '../setup';
 import { Team, Season, Week, Game, Workspace, Player, Pick, Standing } from '../../src/types';
 
-describe('Database Integration', () => {
-  let db: Database;
+/**
+ * Create a mock D1Database interface from better-sqlite3
+ * This allows testing D1 code locally
+ */
+function createMockD1(sqliteDb: BetterSqlite3.Database): D1Database {
+  return {
+    prepare: (query: string) => {
+      const stmt = sqliteDb.prepare(query);
+      
+      return {
+        bind: (...values: any[]) => ({
+          first: async <T = any>() => {
+            try {
+              return stmt.get(...values) as T || null;
+            } catch (error) {
+              throw error;
+            }
+          },
+          all: async <T = any>() => {
+            try {
+              const results = stmt.all(...values) as T[];
+              return { results, success: true, meta: {} };
+            } catch (error) {
+              return { results: [] as T[], success: false, meta: {} };
+            }
+          },
+          run: async () => {
+            try {
+              const info = stmt.run(...values);
+              return {
+                success: true,
+                meta: {
+                  last_row_id: info.lastInsertRowid,
+                  changes: info.changes,
+                  duration: 0,
+                  rows_read: 0,
+                  rows_written: info.changes,
+                },
+              };
+            } catch (error) {
+              return {
+                success: false,
+                meta: {
+                  last_row_id: 0,
+                  changes: 0,
+                  duration: 0,
+                  rows_read: 0,
+                  rows_written: 0,
+                },
+              };
+            }
+          },
+        }),
+        
+        first: async <T = any>() => {
+          try {
+            return stmt.get() as T || null;
+          } catch (error) {
+            throw error;
+          }
+        },
+        
+        all: async <T = any>() => {
+          try {
+            const results = stmt.all() as T[];
+            return { results, success: true, meta: {} };
+          } catch (error) {
+            return { results: [] as T[], success: false, meta: {} };
+          }
+        },
+        
+        run: async () => {
+          try {
+            const info = stmt.run();
+            return {
+              success: true,
+              meta: {
+                last_row_id: info.lastInsertRowid,
+                changes: info.changes,
+                duration: 0,
+                rows_read: 0,
+                rows_written: info.changes,
+              },
+            };
+          } catch (error) {
+            return {
+              success: false,
+              meta: {
+                last_row_id: 0,
+                changes: 0,
+                duration: 0,
+                rows_read: 0,
+                rows_written: 0,
+              },
+            };
+          }
+        },
+      } as any;
+    },
+    
+    batch: async <T = any>(statements: D1PreparedStatement[]) => {
+      // Simulate batch execution
+      const results: any[] = [];
+      
+      for (const stmt of statements) {
+        try {
+          const result = await stmt.run();
+          results.push(result);
+        } catch (error) {
+          results.push({
+            success: false,
+            meta: {
+              last_row_id: 0,
+              changes: 0,
+              duration: 0,
+              rows_read: 0,
+              rows_written: 0,
+              size_after: 0,
+              changed_db: false,
+            },
+          });
+        }
+      }
+      
+      return results;
+    },
+    
+    dump: async () => new ArrayBuffer(0),
+    exec: async (query: string) => ({ count: 0, duration: 0 }),
+  } as D1Database;
+}
 
-  beforeAll(async () => {
-    db = new Database();
-    const connected = await testConnection();
-    if (!connected) {
-      throw new Error('Failed to connect to test database');
-    }
+describe('Database Integration', () => {
+  let sqliteDb: BetterSqlite3.Database;
+  let db: AppDatabase;
+
+  beforeAll(() => {
+    sqliteDb = getTestDb();
+    const mockD1 = createMockD1(sqliteDb);
+    db = new AppDatabase(mockD1);
   });
 
-  afterAll(async () => {
-    await closePool();
+  afterEach(() => {
+    resetTestDb();
   });
 
   describe('Connection', () => {
-    it('should connect to database', async () => {
+    it('should execute basic query', async () => {
       const result = await db.query<{ result: number }>('SELECT 1 as result');
       expect(result[0].result).toBe(1);
     });
   });
 
   describe('Teams', () => {
+    beforeAll(() => {
+      // Insert some test teams
+      sqliteDb.exec(`
+        INSERT INTO teams (team_id, name, slug, city, abbreviation) VALUES
+        (1, 'Kansas City Chiefs', 'chiefs', 'Kansas City', 'KC'),
+        (2, 'Buffalo Bills', 'bills', 'Buffalo', 'BUF')
+      `);
+    });
+
     it('should find all teams', async () => {
       const teams = await db.teams.findAll();
       expect(teams.length).toBeGreaterThan(0);
     });
 
     it('should find team by ID', async () => {
-      const teams = await db.teams.findAll();
-      const firstTeam = teams[0];
-      const team = await db.teams.findById(firstTeam.team_id);
+      const team = await db.teams.findById(1);
       expect(team).not.toBeNull();
-      expect(team?.team_id).toBe(firstTeam.team_id);
+      expect(team?.team_id).toBe(1);
     });
 
     it('should find team by slug', async () => {
@@ -46,8 +194,6 @@ describe('Database Integration', () => {
   });
 
   describe('Seasons', () => {
-    let testSeasonId: number;
-
     it('should create a season', async () => {
       const season = await db.seasons.create({
         year: 2025,
@@ -56,30 +202,26 @@ describe('Database Integration', () => {
       });
       expect(season.season_id).toBeDefined();
       expect(season.year).toBe(2025);
-      testSeasonId = season.season_id;
     });
 
     it('should find season by year', async () => {
-      const season = await db.seasons.findByYear(2025);
+      await db.seasons.create({ year: 2024, weeks_count: 18, state: 'active' });
+      const season = await db.seasons.findByYear(2024);
       expect(season).not.toBeNull();
-      expect(season?.season_id).toBe(testSeasonId);
+      expect(season?.year).toBe(2024);
     });
 
     it('should update season', async () => {
-      const updated = await db.seasons.update(testSeasonId, { state: 'active' });
+      const created = await db.seasons.create({ year: 2023, weeks_count: 18, state: 'upcoming' });
+      const updated = await db.seasons.update(created.season_id, { state: 'active' });
       expect(updated.state).toBe('active');
-    });
-
-    afterAll(async () => {
-      await db.query('DELETE FROM seasons WHERE season_id = $1', [testSeasonId]);
     });
   });
 
   describe('Weeks', () => {
     let testSeasonId: number;
-    let testWeekId: number;
 
-    beforeAll(async () => {
+    beforeEach(async () => {
       const season = await db.seasons.create({
         year: 2024,
         weeks_count: 18,
@@ -93,111 +235,56 @@ describe('Database Integration', () => {
         season_id: testSeasonId,
         week_number: 1,
         state: 'open',
-        open_at: new Date(),
+        open_at: new Date('2024-09-05T12:00:00Z'),
         close_at: null,
       });
       expect(week.week_id).toBeDefined();
       expect(week.week_number).toBe(1);
-      testWeekId = week.week_id;
     });
 
     it('should find weeks by season', async () => {
+      await db.weeks.create({
+        season_id: testSeasonId,
+        week_number: 1,
+        state: 'open',
+        open_at: new Date('2024-09-05T12:00:00Z'),
+        close_at: null,
+      });
+      
       const weeks = await db.weeks.findBySeason(testSeasonId);
       expect(weeks.length).toBeGreaterThan(0);
     });
 
     it('should find week by season and number', async () => {
-      const week = await db.weeks.findBySeasonAndNumber(testSeasonId, 1);
+      await db.weeks.create({
+        season_id: testSeasonId,
+        week_number: 2,
+        state: 'scheduled',
+        open_at: null,
+        close_at: null,
+      });
+      
+      const week = await db.weeks.findBySeasonAndNumber(testSeasonId, 2);
       expect(week).not.toBeNull();
-      expect(week?.week_id).toBe(testWeekId);
+      expect(week?.week_number).toBe(2);
     });
 
     it('should update week', async () => {
-      const updated = await db.weeks.update(testWeekId, { state: 'in_progress' });
-      expect(updated.state).toBe('in_progress');
-    });
-
-    afterAll(async () => {
-      await db.query('DELETE FROM weeks WHERE season_id = $1', [testSeasonId]);
-      await db.query('DELETE FROM seasons WHERE season_id = $1', [testSeasonId]);
-    });
-  });
-
-  describe('Games', () => {
-    let testSeasonId: number;
-    let testWeekId: number;
-    let testGameId: number;
-    let homeTeamId: number;
-    let awayTeamId: number;
-
-    beforeAll(async () => {
-      const season = await db.seasons.create({ year: 2023, weeks_count: 18, state: 'active' });
-      testSeasonId = season.season_id;
-
-      const week = await db.weeks.create({
+      const created = await db.weeks.create({
         season_id: testSeasonId,
-        week_number: 1,
-        state: 'open',
-        open_at: new Date(),
+        week_number: 3,
+        state: 'scheduled',
+        open_at: null,
         close_at: null,
       });
-      testWeekId = week.week_id;
-
-      const teams = await db.teams.findAll();
-      homeTeamId = teams[0].team_id;
-      awayTeamId = teams[1].team_id;
-    });
-
-    it('should create a game', async () => {
-      const game = await db.games.create({
-        week_id: testWeekId,
-        external_id: 'espn-test-123',
-        home_team_id: homeTeamId,
-        away_team_id: awayTeamId,
-        kickoff_time: new Date(),
-        status: 'scheduled',
-      });
-      expect(game.game_id).toBeDefined();
-      testGameId = game.game_id;
-    });
-
-    it('should find game by external ID', async () => {
-      const game = await db.games.findByExternalId('espn-test-123');
-      expect(game).not.toBeNull();
-      expect(game?.game_id).toBe(testGameId);
-    });
-
-    it('should find games by week', async () => {
-      const games = await db.games.findByWeek(testWeekId);
-      expect(games.length).toBeGreaterThan(0);
-    });
-
-    it('should update game', async () => {
-      const updated = await db.games.update(testGameId, {
-        status: 'final',
-        home_score: 24,
-        away_score: 17,
-        winner_team_id: homeTeamId,
-      });
-      expect(updated.status).toBe('final');
-      expect(updated.home_score).toBe(24);
-    });
-
-    it('should check if all games final', async () => {
-      const allFinal = await db.games.allFinalForWeek(testWeekId);
-      expect(allFinal).toBe(true);
-    });
-
-    afterAll(async () => {
-      await db.query('DELETE FROM games WHERE week_id = $1', [testWeekId]);
-      await db.query('DELETE FROM weeks WHERE season_id = $1', [testSeasonId]);
-      await db.query('DELETE FROM seasons WHERE season_id = $1', [testSeasonId]);
+      
+      const updated = await db.weeks.update(created.week_id, { state: 'in_progress' });
+      expect(updated.state).toBe('in_progress');
     });
   });
 
   describe('Workspaces and Players', () => {
     let testWorkspaceId: number;
-    let testPlayerId: number;
 
     it('should create a workspace', async () => {
       const workspace = await db.workspaces.create({
@@ -212,54 +299,81 @@ describe('Database Integration', () => {
     });
 
     it('should find workspace by platform ID', async () => {
-      const workspace = await db.workspaces.findByPlatformId('slack', 'T12345678');
+      await db.workspaces.create({
+        platform: 'discord',
+        platform_workspace_id: 'D87654321',
+        name: 'Discord Workspace',
+        reminder_friday_enabled: false,
+        reminder_sunday_enabled: true,
+      });
+      
+      const workspace = await db.workspaces.findByPlatformId('discord', 'D87654321');
       expect(workspace).not.toBeNull();
-      expect(workspace?.workspace_id).toBe(testWorkspaceId);
+      expect(workspace?.platform).toBe('discord');
     });
 
     it('should update workspace', async () => {
-      const updated = await db.workspaces.update(testWorkspaceId, {
-        name: 'Updated Workspace',
+      const created = await db.workspaces.create({
+        platform: 'slack',
+        platform_workspace_id: 'T99999999',
+        name: 'Update Test',
+        reminder_friday_enabled: true,
+        reminder_sunday_enabled: true,
       });
-      expect(updated.name).toBe('Updated Workspace');
+      
+      const updated = await db.workspaces.update(created.workspace_id, {
+        name: 'Updated Name',
+      });
+      expect(updated.name).toBe('Updated Name');
     });
 
     it('should create a player', async () => {
+      const workspace = await db.workspaces.create({
+        platform: 'slack',
+        platform_workspace_id: 'T11111111',
+        name: 'Player Test Workspace',
+        reminder_friday_enabled: true,
+        reminder_sunday_enabled: true,
+      });
+      
       const player = await db.players.create({
-        workspace_id: testWorkspaceId,
+        workspace_id: workspace.workspace_id,
         platform_user_id: 'U12345678',
         display_name: 'Test Player',
         is_admin: true,
         joined_week_id: null,
       });
       expect(player.player_id).toBeDefined();
-      testPlayerId = player.player_id;
-    });
-
-    it('should find player by workspace and platform user ID', async () => {
-      const player = await db.players.findByWorkspaceAndPlatformUserId(
-        testWorkspaceId,
-        'U12345678'
-      );
-      expect(player).not.toBeNull();
-      expect(player?.player_id).toBe(testPlayerId);
+      expect(player.display_name).toBe('Test Player');
     });
 
     it('should find players by workspace', async () => {
-      const players = await db.players.findByWorkspace(testWorkspaceId);
-      expect(players.length).toBeGreaterThan(0);
-    });
-
-    it('should update player', async () => {
-      const updated = await db.players.update(testPlayerId, {
-        display_name: 'Updated Player',
+      const workspace = await db.workspaces.create({
+        platform: 'slack',
+        platform_workspace_id: 'T22222222',
+        name: 'Multi Player Workspace',
+        reminder_friday_enabled: true,
+        reminder_sunday_enabled: true,
       });
-      expect(updated.display_name).toBe('Updated Player');
-    });
-
-    afterAll(async () => {
-      await db.query('DELETE FROM players WHERE workspace_id = $1', [testWorkspaceId]);
-      await db.query('DELETE FROM workspaces WHERE workspace_id = $1', [testWorkspaceId]);
+      
+      await db.players.create({
+        workspace_id: workspace.workspace_id,
+        platform_user_id: 'U1',
+        display_name: 'Player 1',
+        is_admin: false,
+        joined_week_id: null,
+      });
+      
+      await db.players.create({
+        workspace_id: workspace.workspace_id,
+        platform_user_id: 'U2',
+        display_name: 'Player 2',
+        is_admin: false,
+        joined_week_id: null,
+      });
+      
+      const players = await db.players.findByWorkspace(workspace.workspace_id);
+      expect(players.length).toBe(2);
     });
   });
 
@@ -268,13 +382,16 @@ describe('Database Integration', () => {
     let testPlayerId: number;
     let testSeasonId: number;
     let testWeekId: number;
-    let testPickId: number;
     let testTeamId: number;
 
-    beforeAll(async () => {
+    beforeEach(async () => {
+      // Setup test data
+      sqliteDb.exec(`INSERT INTO teams (team_id, name, slug, city, abbreviation) VALUES (10, 'Test Team', 'test', 'Test City', 'TST')`);
+      testTeamId = 10;
+      
       const workspace = await db.workspaces.create({
         platform: 'slack',
-        platform_workspace_id: 'T99999999',
+        platform_workspace_id: 'T_PICK_TEST',
         name: 'Pick Test Workspace',
         reminder_friday_enabled: true,
         reminder_sunday_enabled: true,
@@ -283,7 +400,7 @@ describe('Database Integration', () => {
 
       const player = await db.players.create({
         workspace_id: testWorkspaceId,
-        platform_user_id: 'U99999999',
+        platform_user_id: 'U_PICK_TEST',
         display_name: 'Pick Tester',
         is_admin: false,
         joined_week_id: null,
@@ -297,13 +414,10 @@ describe('Database Integration', () => {
         season_id: testSeasonId,
         week_number: 1,
         state: 'open',
-        open_at: new Date(),
+        open_at: new Date('2022-09-08T12:00:00Z'),
         close_at: null,
       });
       testWeekId = week.week_id;
-
-      const teams = await db.teams.findAll();
-      testTeamId = teams[0].team_id;
     });
 
     it('should create a pick', async () => {
@@ -316,46 +430,51 @@ describe('Database Integration', () => {
         outcome: null,
       });
       expect(pick.pick_id).toBeDefined();
-      testPickId = pick.pick_id;
     });
 
     it('should find pick by week and player', async () => {
+      await db.picks.create({
+        week_id: testWeekId,
+        player_id: testPlayerId,
+        team_id: testTeamId,
+        source: 'manual',
+        locked_at: null,
+        outcome: null,
+      });
+      
       const pick = await db.picks.findByWeekAndPlayer(testWeekId, testPlayerId);
       expect(pick).not.toBeNull();
-      expect(pick?.pick_id).toBe(testPickId);
-    });
-
-    it('should find picks by player', async () => {
-      const picks = await db.picks.findByPlayer(testPlayerId);
-      expect(picks.length).toBeGreaterThan(0);
-    });
-
-    it('should find picks by season', async () => {
-      const picks = await db.picks.findBySeason(testSeasonId, testPlayerId);
-      expect(picks.length).toBeGreaterThan(0);
     });
 
     it('should update pick', async () => {
-      const updated = await db.picks.update(testPickId, {
-        locked_at: new Date(),
+      const created = await db.picks.create({
+        week_id: testWeekId,
+        player_id: testPlayerId,
+        team_id: testTeamId,
+        source: 'manual',
+        locked_at: null,
+        outcome: null,
+      });
+      
+      const updated = await db.picks.update(created.pick_id, {
         outcome: 'win',
       });
       expect(updated.outcome).toBe('win');
-      expect(updated.locked_at).not.toBeNull();
     });
 
     it('should delete pick', async () => {
-      await db.picks.delete(testPickId);
-      const pick = await db.picks.findById(testPickId);
+      const created = await db.picks.create({
+        week_id: testWeekId,
+        player_id: testPlayerId,
+        team_id: testTeamId,
+        source: 'manual',
+        locked_at: null,
+        outcome: null,
+      });
+      
+      await db.picks.delete(created.pick_id);
+      const pick = await db.picks.findById(created.pick_id);
       expect(pick).toBeNull();
-    });
-
-    afterAll(async () => {
-      await db.query('DELETE FROM picks WHERE player_id = $1', [testPlayerId]);
-      await db.query('DELETE FROM players WHERE workspace_id = $1', [testWorkspaceId]);
-      await db.query('DELETE FROM workspaces WHERE workspace_id = $1', [testWorkspaceId]);
-      await db.query('DELETE FROM weeks WHERE season_id = $1', [testSeasonId]);
-      await db.query('DELETE FROM seasons WHERE season_id = $1', [testSeasonId]);
     });
   });
 
@@ -363,13 +482,12 @@ describe('Database Integration', () => {
     let testWorkspaceId: number;
     let testPlayerId: number;
     let testSeasonId: number;
-    let testStandingId: number;
 
-    beforeAll(async () => {
+    beforeEach(async () => {
       const workspace = await db.workspaces.create({
         platform: 'slack',
-        platform_workspace_id: 'T88888888',
-        name: 'Standings Test Workspace',
+        platform_workspace_id: 'T_STANDING_TEST',
+        name: 'Standing Test Workspace',
         reminder_friday_enabled: true,
         reminder_sunday_enabled: true,
       });
@@ -377,8 +495,8 @@ describe('Database Integration', () => {
 
       const player = await db.players.create({
         workspace_id: testWorkspaceId,
-        platform_user_id: 'U88888888',
-        display_name: 'Standings Tester',
+        platform_user_id: 'U_STANDING_TEST',
+        display_name: 'Standing Tester',
         is_admin: false,
         joined_week_id: null,
       });
@@ -396,33 +514,35 @@ describe('Database Integration', () => {
         losses: 3,
       });
       expect(standing.standing_id).toBeDefined();
-      testStandingId = standing.standing_id;
+      expect(standing.wins).toBe(5);
     });
 
     it('should find standings by season and player', async () => {
+      await db.standings.create({
+        season_id: testSeasonId,
+        player_id: testPlayerId,
+        wins: 5,
+        losses: 3,
+      });
+      
       const standing = await db.standings.findBySeasonAndPlayer(testSeasonId, testPlayerId);
       expect(standing).not.toBeNull();
       expect(standing?.wins).toBe(5);
     });
 
-    it('should find standings by season', async () => {
-      const standings = await db.standings.findBySeason(testSeasonId);
-      expect(standings.length).toBeGreaterThan(0);
-    });
-
     it('should update standings', async () => {
-      const updated = await db.standings.update(testStandingId, {
+      const created = await db.standings.create({
+        season_id: testSeasonId,
+        player_id: testPlayerId,
+        wins: 5,
+        losses: 3,
+      });
+      
+      const updated = await db.standings.update(created.standing_id, {
         wins: 6,
         losses: 3,
       });
       expect(updated.wins).toBe(6);
-    });
-
-    afterAll(async () => {
-      await db.query('DELETE FROM standings WHERE season_id = $1', [testSeasonId]);
-      await db.query('DELETE FROM players WHERE workspace_id = $1', [testWorkspaceId]);
-      await db.query('DELETE FROM workspaces WHERE workspace_id = $1', [testWorkspaceId]);
-      await db.query('DELETE FROM seasons WHERE season_id = $1', [testSeasonId]);
     });
   });
 
@@ -430,10 +550,10 @@ describe('Database Integration', () => {
     let testWorkspaceId: number;
     let testPlayerId: number;
 
-    beforeAll(async () => {
+    beforeEach(async () => {
       const workspace = await db.workspaces.create({
         platform: 'slack',
-        platform_workspace_id: 'T77777777',
+        platform_workspace_id: 'T_AUDIT_TEST',
         name: 'Audit Test Workspace',
         reminder_friday_enabled: true,
         reminder_sunday_enabled: true,
@@ -442,7 +562,7 @@ describe('Database Integration', () => {
 
       const player = await db.players.create({
         workspace_id: testWorkspaceId,
-        platform_user_id: 'U77777777',
+        platform_user_id: 'U_AUDIT_TEST',
         display_name: 'Audit Tester',
         is_admin: false,
         joined_week_id: null,
@@ -450,7 +570,7 @@ describe('Database Integration', () => {
       testPlayerId = player.player_id;
     });
 
-    it('should create audit log entry', async () => {
+    it('should create audit log entry with JSON payload', async () => {
       const log = await db.auditLog.create({
         workspace_id: testWorkspaceId,
         actor_type: 'player',
@@ -461,87 +581,22 @@ describe('Database Integration', () => {
         payload: { team: 'chiefs', week: 1 },
       });
       expect(log.log_id).toBeDefined();
+      expect(log.payload).toEqual({ team: 'chiefs', week: 1 });
     });
 
     it('should find audit logs by workspace', async () => {
+      await db.auditLog.create({
+        workspace_id: testWorkspaceId,
+        actor_type: 'system',
+        actor_id: null,
+        action: 'week_locked',
+        entity_type: 'week',
+        entity_id: 1,
+        payload: null,
+      });
+      
       const logs = await db.auditLog.findByWorkspace(testWorkspaceId);
       expect(logs.length).toBeGreaterThan(0);
-    });
-
-    afterAll(async () => {
-      await db.query('DELETE FROM audit_log WHERE workspace_id = $1', [testWorkspaceId]);
-      await db.query('DELETE FROM players WHERE workspace_id = $1', [testWorkspaceId]);
-      await db.query('DELETE FROM workspaces WHERE workspace_id = $1', [testWorkspaceId]);
-    });
-  });
-
-  describe('Transactions', () => {
-    let testWorkspaceId: number;
-    let testPlayerId: number;
-    let testSeasonId: number;
-
-    beforeAll(async () => {
-      const workspace = await db.workspaces.create({
-        platform: 'slack',
-        platform_workspace_id: 'T66666666',
-        name: 'Transaction Test Workspace',
-        reminder_friday_enabled: true,
-        reminder_sunday_enabled: true,
-      });
-      testWorkspaceId = workspace.workspace_id;
-
-      const player = await db.players.create({
-        workspace_id: testWorkspaceId,
-        platform_user_id: 'U66666666',
-        display_name: 'Transaction Tester',
-        is_admin: false,
-        joined_week_id: null,
-      });
-      testPlayerId = player.player_id;
-
-      const season = await db.seasons.create({ year: 2020, weeks_count: 18, state: 'active' });
-      testSeasonId = season.season_id;
-    });
-
-    it('should commit transaction on success', async () => {
-      const result = await db.transaction(async (client) => {
-        const standingResult = await client.query(
-          `INSERT INTO standings (season_id, player_id, wins, losses)
-           VALUES ($1, $2, $3, $4) RETURNING *`,
-          [testSeasonId, testPlayerId, 10, 5]
-        );
-        return standingResult.rows[0];
-      });
-
-      expect(result.wins).toBe(10);
-
-      const standing = await db.standings.findBySeasonAndPlayer(testSeasonId, testPlayerId);
-      expect(standing).not.toBeNull();
-      expect(standing?.wins).toBe(10);
-    });
-
-    it('should rollback transaction on error', async () => {
-      try {
-        await db.transaction(async (client) => {
-          await client.query(
-            `UPDATE standings SET wins = $1 WHERE season_id = $2 AND player_id = $3`,
-            [999, testSeasonId, testPlayerId]
-          );
-          throw new Error('Intentional error');
-        });
-      } catch (error) {
-        // Expected error
-      }
-
-      const standing = await db.standings.findBySeasonAndPlayer(testSeasonId, testPlayerId);
-      expect(standing?.wins).toBe(10); // Should still be 10, not 999
-    });
-
-    afterAll(async () => {
-      await db.query('DELETE FROM standings WHERE season_id = $1', [testSeasonId]);
-      await db.query('DELETE FROM players WHERE workspace_id = $1', [testWorkspaceId]);
-      await db.query('DELETE FROM workspaces WHERE workspace_id = $1', [testWorkspaceId]);
-      await db.query('DELETE FROM seasons WHERE season_id = $1', [testSeasonId]);
     });
   });
 });

@@ -1,42 +1,100 @@
-import { PoolClient } from 'pg';
-import { IDatabase } from '../services/interfaces/IDatabase';
+/**
+ * Database Implementation (Cloudflare D1)
+ * 
+ * Uses Cloudflare D1 (SQLite-based) serverless database.
+ * - Uses .prepare().bind().all()/.first()/.run() for queries
+ * - Parameter placeholders are ? instead of $1, $2, etc.
+ * - Transactions use D1 batch() API (atomic but limited)
+ * - Trigger logic handled in application layer (no database triggers)
+ */
+
+import { IDatabase, ITransactionClient } from '../services/interfaces/IDatabase';
 import { 
   Team, Season, Week, Game, Workspace, Player, Pick, Standing, AuditLog 
 } from '../types';
-import { getPool, query } from './connection';
 import { logger } from '../utils/logger';
 
-export class Database implements IDatabase {
-  /**
-   * Execute a query with automatic connection management
-   */
+/**
+ * Helper class for collecting statements in a batch transaction
+ */
+class BatchCollector implements ITransactionClient {
+  statements: D1PreparedStatement[] = [];
+
   async query<T = any>(text: string, params?: any[]): Promise<T[]> {
-    return query<T>(text, params);
+    // Note: This is a simplified interface - in real usage you'd need access to D1Database
+    // For now, this is a placeholder to show the pattern
+    throw new Error('BatchCollector.query not yet implemented - use direct batch API instead');
+  }
+}
+
+export class Database implements IDatabase {
+  private db: D1Database;
+
+  constructor(db: D1Database) {
+    this.db = db;
   }
 
   /**
-   * Execute a callback within a transaction
-   * Automatically commits on success or rolls back on error
+   * Execute a query with parameters
+   * Returns all matching rows
    */
-  async transaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
-    const client = await getPool().connect();
+  async query<T = any>(text: string, params?: any[]): Promise<T[]> {
+    try {
+      logger.debug('Executing D1 query', { query: text, params });
+      
+      const stmt = this.db.prepare(text);
+      const boundStmt = params && params.length > 0 ? stmt.bind(...params) : stmt;
+      const result = await boundStmt.all<T>();
+      
+      if (!result.success) {
+        throw new Error('D1 query failed');
+      }
+      
+      return result.results;
+    } catch (error) {
+      logger.error('D1 query execution failed', { query: text, params, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Execute a callback within a batch (D1's transaction-like mechanism)
+   * 
+   * Note: D1 batch is not a true transaction with full ACID guarantees.
+   * All statements execute atomically, but:
+   * - No rollback on business logic errors
+   * - Limited to prepared statements collected upfront
+   * - Cannot execute conditional logic mid-batch
+   * 
+   * For complex transactions, consider using service-layer coordination.
+   */
+  async transaction<T>(callback: (batchCollector: ITransactionClient) => Promise<T>): Promise<T> {
+    const collector = new BatchCollector();
     
     try {
-      await client.query('BEGIN');
-      logger.debug('Transaction started');
+      logger.debug('D1 batch transaction started');
       
-      const result = await callback(client);
+      // Execute callback to collect statements
+      const result = await callback(collector);
       
-      await client.query('COMMIT');
-      logger.debug('Transaction committed');
+      // Execute all collected statements as a batch
+      if (collector.statements.length > 0) {
+        const results = await this.db.batch(collector.statements);
+        
+        const failed = results.find((r: D1Result) => !r.success);
+        if (failed) {
+          throw new Error('D1 batch execution failed');
+        }
+        
+        logger.debug('D1 batch transaction completed', { 
+          statementCount: collector.statements.length 
+        });
+      }
       
       return result;
     } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Transaction rolled back', { error });
+      logger.error('D1 batch transaction failed', { error });
       throw error;
-    } finally {
-      client.release();
     }
   }
 
@@ -45,15 +103,12 @@ export class Database implements IDatabase {
    */
   teams = {
     findAll: async (): Promise<Team[]> => {
-      const rows = await this.query<Team>(
-        'SELECT * FROM teams ORDER BY name'
-      );
-      return rows;
+      return this.query<Team>('SELECT * FROM teams ORDER BY name');
     },
 
     findById: async (id: number): Promise<Team | null> => {
       const rows = await this.query<Team>(
-        'SELECT * FROM teams WHERE team_id = $1',
+        'SELECT * FROM teams WHERE team_id = ?',
         [id]
       );
       return rows[0] || null;
@@ -61,7 +116,7 @@ export class Database implements IDatabase {
 
     findBySlug: async (slug: string): Promise<Team | null> => {
       const rows = await this.query<Team>(
-        'SELECT * FROM teams WHERE slug = $1',
+        'SELECT * FROM teams WHERE slug = ?',
         [slug]
       );
       return rows[0] || null;
@@ -74,18 +129,30 @@ export class Database implements IDatabase {
   seasons = {
     findByYear: async (year: number): Promise<Season | null> => {
       const rows = await this.query<Season>(
-        'SELECT * FROM seasons WHERE year = $1',
+        'SELECT * FROM seasons WHERE year = ?',
         [year]
       );
       return rows[0] || null;
     },
 
     create: async (data: Partial<Season>): Promise<Season> => {
-      const rows = await this.query<Season>(
+      const result = await this.db.prepare(
         `INSERT INTO seasons (year, weeks_count, state)
-         VALUES ($1, $2, $3)
-         RETURNING *`,
-        [data.year, data.weeks_count || 18, data.state || 'upcoming']
+         VALUES (?, ?, ?)`
+      ).bind(
+        data.year, 
+        data.weeks_count || 18, 
+        data.state || 'upcoming'
+      ).run();
+
+      if (!result.success) {
+        throw new Error('Failed to create season');
+      }
+
+      // Fetch the created row
+      const rows = await this.query<Season>(
+        'SELECT * FROM seasons WHERE season_id = ?',
+        [result.meta.last_row_id]
       );
       return rows[0];
     },
@@ -93,24 +160,32 @@ export class Database implements IDatabase {
     update: async (id: number, data: Partial<Season>): Promise<Season> => {
       const fields: string[] = [];
       const values: any[] = [];
-      let paramCount = 1;
 
       if (data.state !== undefined) {
-        fields.push(`state = $${paramCount++}`);
+        fields.push('state = ?');
         values.push(data.state);
       }
       if (data.weeks_count !== undefined) {
-        fields.push(`weeks_count = $${paramCount++}`);
+        fields.push('weeks_count = ?');
         values.push(data.weeks_count);
       }
 
+      // Add updated_at timestamp manually (no trigger in D1)
+      fields.push("updated_at = datetime('now')");
       values.push(id);
 
+      const result = await this.db.prepare(
+        `UPDATE seasons SET ${fields.join(', ')} WHERE season_id = ?`
+      ).bind(...values).run();
+
+      if (!result.success) {
+        throw new Error('Failed to update season');
+      }
+
+      // Fetch the updated row
       const rows = await this.query<Season>(
-        `UPDATE seasons SET ${fields.join(', ')}
-         WHERE season_id = $${paramCount}
-         RETURNING *`,
-        values
+        'SELECT * FROM seasons WHERE season_id = ?',
+        [id]
       );
       return rows[0];
     },
@@ -122,34 +197,46 @@ export class Database implements IDatabase {
   weeks = {
     findById: async (id: number): Promise<Week | null> => {
       const rows = await this.query<Week>(
-        'SELECT * FROM weeks WHERE week_id = $1',
+        'SELECT * FROM weeks WHERE week_id = ?',
         [id]
       );
       return rows[0] || null;
     },
 
     findBySeason: async (seasonId: number): Promise<Week[]> => {
-      const rows = await this.query<Week>(
-        'SELECT * FROM weeks WHERE season_id = $1 ORDER BY week_number',
+      return this.query<Week>(
+        'SELECT * FROM weeks WHERE season_id = ? ORDER BY week_number',
         [seasonId]
       );
-      return rows;
     },
 
     findBySeasonAndNumber: async (seasonId: number, weekNumber: number): Promise<Week | null> => {
       const rows = await this.query<Week>(
-        'SELECT * FROM weeks WHERE season_id = $1 AND week_number = $2',
+        'SELECT * FROM weeks WHERE season_id = ? AND week_number = ?',
         [seasonId, weekNumber]
       );
       return rows[0] || null;
     },
 
     create: async (data: Partial<Week>): Promise<Week> => {
-      const rows = await this.query<Week>(
+      const result = await this.db.prepare(
         `INSERT INTO weeks (season_id, week_number, state, open_at, close_at)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING *`,
-        [data.season_id, data.week_number, data.state || 'scheduled', data.open_at || null, data.close_at || null]
+         VALUES (?, ?, ?, ?, ?)`
+      ).bind(
+        data.season_id, 
+        data.week_number, 
+        data.state || 'scheduled', 
+        data.open_at || null, 
+        data.close_at || null
+      ).run();
+
+      if (!result.success) {
+        throw new Error('Failed to create week');
+      }
+
+      const rows = await this.query<Week>(
+        'SELECT * FROM weeks WHERE week_id = ?',
+        [result.meta.last_row_id]
       );
       return rows[0];
     },
@@ -157,28 +244,34 @@ export class Database implements IDatabase {
     update: async (id: number, data: Partial<Week>): Promise<Week> => {
       const fields: string[] = [];
       const values: any[] = [];
-      let paramCount = 1;
 
       if (data.state !== undefined) {
-        fields.push(`state = $${paramCount++}`);
+        fields.push('state = ?');
         values.push(data.state);
       }
       if (data.open_at !== undefined) {
-        fields.push(`open_at = $${paramCount++}`);
+        fields.push('open_at = ?');
         values.push(data.open_at);
       }
       if (data.close_at !== undefined) {
-        fields.push(`close_at = $${paramCount++}`);
+        fields.push('close_at = ?');
         values.push(data.close_at);
       }
 
+      fields.push("updated_at = datetime('now')");
       values.push(id);
 
+      const result = await this.db.prepare(
+        `UPDATE weeks SET ${fields.join(', ')} WHERE week_id = ?`
+      ).bind(...values).run();
+
+      if (!result.success) {
+        throw new Error('Failed to update week');
+      }
+
       const rows = await this.query<Week>(
-        `UPDATE weeks SET ${fields.join(', ')}
-         WHERE week_id = $${paramCount}
-         RETURNING *`,
-        values
+        'SELECT * FROM weeks WHERE week_id = ?',
+        [id]
       );
       return rows[0];
     },
@@ -190,41 +283,47 @@ export class Database implements IDatabase {
   games = {
     findById: async (id: number): Promise<Game | null> => {
       const rows = await this.query<Game>(
-        'SELECT * FROM games WHERE game_id = $1',
+        'SELECT * FROM games WHERE game_id = ?',
         [id]
       );
       return rows[0] || null;
     },
 
     findByWeek: async (weekId: number): Promise<Game[]> => {
-      const rows = await this.query<Game>(
-        'SELECT * FROM games WHERE week_id = $1 ORDER BY kickoff_time',
+      return this.query<Game>(
+        'SELECT * FROM games WHERE week_id = ? ORDER BY kickoff_time',
         [weekId]
       );
-      return rows;
     },
 
     findByExternalId: async (externalId: string): Promise<Game | null> => {
       const rows = await this.query<Game>(
-        'SELECT * FROM games WHERE external_id = $1',
+        'SELECT * FROM games WHERE external_id = ?',
         [externalId]
       );
       return rows[0] || null;
     },
 
     create: async (data: Partial<Game>): Promise<Game> => {
-      const rows = await this.query<Game>(
+      const result = await this.db.prepare(
         `INSERT INTO games (
           week_id, external_id, home_team_id, away_team_id,
           kickoff_time, status, home_score, away_score, winner_team_id
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING *`,
-        [
-          data.week_id, data.external_id, data.home_team_id, data.away_team_id,
-          data.kickoff_time, data.status || 'scheduled', 
-          data.home_score || null, data.away_score || null, data.winner_team_id || null
-        ]
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        data.week_id, data.external_id, data.home_team_id, data.away_team_id,
+        data.kickoff_time, data.status || 'scheduled', 
+        data.home_score || null, data.away_score || null, data.winner_team_id || null
+      ).run();
+
+      if (!result.success) {
+        throw new Error('Failed to create game');
+      }
+
+      const rows = await this.query<Game>(
+        'SELECT * FROM games WHERE game_id = ?',
+        [result.meta.last_row_id]
       );
       return rows[0];
     },
@@ -232,49 +331,56 @@ export class Database implements IDatabase {
     update: async (id: number, data: Partial<Game>): Promise<Game> => {
       const fields: string[] = [];
       const values: any[] = [];
-      let paramCount = 1;
 
       if (data.kickoff_time !== undefined) {
-        fields.push(`kickoff_time = $${paramCount++}`);
+        fields.push('kickoff_time = ?');
         values.push(data.kickoff_time);
       }
       if (data.status !== undefined) {
-        fields.push(`status = $${paramCount++}`);
+        fields.push('status = ?');
         values.push(data.status);
       }
       if (data.home_score !== undefined) {
-        fields.push(`home_score = $${paramCount++}`);
+        fields.push('home_score = ?');
         values.push(data.home_score);
       }
       if (data.away_score !== undefined) {
-        fields.push(`away_score = $${paramCount++}`);
+        fields.push('away_score = ?');
         values.push(data.away_score);
       }
       if (data.winner_team_id !== undefined) {
-        fields.push(`winner_team_id = $${paramCount++}`);
+        fields.push('winner_team_id = ?');
         values.push(data.winner_team_id);
       }
 
+      fields.push("updated_at = datetime('now')");
       values.push(id);
 
+      const result = await this.db.prepare(
+        `UPDATE games SET ${fields.join(', ')} WHERE game_id = ?`
+      ).bind(...values).run();
+
+      if (!result.success) {
+        throw new Error('Failed to update game');
+      }
+
       const rows = await this.query<Game>(
-        `UPDATE games SET ${fields.join(', ')}
-         WHERE game_id = $${paramCount}
-         RETURNING *`,
-        values
+        'SELECT * FROM games WHERE game_id = ?',
+        [id]
       );
       return rows[0];
     },
 
     allFinalForWeek: async (weekId: number): Promise<boolean> => {
-      const rows = await this.query<{ all_final: boolean }>(
+      const rows = await this.query<{ all_final: number }>(
         `SELECT NOT EXISTS(
           SELECT 1 FROM games 
-          WHERE week_id = $1 AND status != 'final'
+          WHERE week_id = ? AND status != 'final'
          ) as all_final`,
         [weekId]
       );
-      return rows[0].all_final;
+      // SQLite returns 0/1 for boolean expressions
+      return rows[0].all_final === 1;
     },
   };
 
@@ -284,7 +390,7 @@ export class Database implements IDatabase {
   workspaces = {
     findById: async (id: number): Promise<Workspace | null> => {
       const rows = await this.query<Workspace>(
-        'SELECT * FROM workspaces WHERE workspace_id = $1',
+        'SELECT * FROM workspaces WHERE workspace_id = ?',
         [id]
       );
       return rows[0] || null;
@@ -292,24 +398,34 @@ export class Database implements IDatabase {
 
     findByPlatformId: async (platform: string, platformWorkspaceId: string): Promise<Workspace | null> => {
       const rows = await this.query<Workspace>(
-        'SELECT * FROM workspaces WHERE platform = $1 AND platform_workspace_id = $2',
+        'SELECT * FROM workspaces WHERE platform = ? AND platform_workspace_id = ?',
         [platform, platformWorkspaceId]
       );
       return rows[0] || null;
     },
 
     create: async (data: Partial<Workspace>): Promise<Workspace> => {
-      const rows = await this.query<Workspace>(
+      const result = await this.db.prepare(
         `INSERT INTO workspaces (
           platform, platform_workspace_id, name,
           reminder_friday_enabled, reminder_sunday_enabled
          )
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING *`,
-        [
-          data.platform, data.platform_workspace_id, data.name,
-          data.reminder_friday_enabled ?? true, data.reminder_sunday_enabled ?? true
-        ]
+         VALUES (?, ?, ?, ?, ?)`
+      ).bind(
+        data.platform, 
+        data.platform_workspace_id, 
+        data.name,
+        data.reminder_friday_enabled ?? 1,  // SQLite: 1 = true, 0 = false
+        data.reminder_sunday_enabled ?? 1
+      ).run();
+
+      if (!result.success) {
+        throw new Error('Failed to create workspace');
+      }
+
+      const rows = await this.query<Workspace>(
+        'SELECT * FROM workspaces WHERE workspace_id = ?',
+        [result.meta.last_row_id]
       );
       return rows[0];
     },
@@ -317,28 +433,34 @@ export class Database implements IDatabase {
     update: async (id: number, data: Partial<Workspace>): Promise<Workspace> => {
       const fields: string[] = [];
       const values: any[] = [];
-      let paramCount = 1;
 
       if (data.name !== undefined) {
-        fields.push(`name = $${paramCount++}`);
+        fields.push('name = ?');
         values.push(data.name);
       }
       if (data.reminder_friday_enabled !== undefined) {
-        fields.push(`reminder_friday_enabled = $${paramCount++}`);
-        values.push(data.reminder_friday_enabled);
+        fields.push('reminder_friday_enabled = ?');
+        values.push(data.reminder_friday_enabled ? 1 : 0);
       }
       if (data.reminder_sunday_enabled !== undefined) {
-        fields.push(`reminder_sunday_enabled = $${paramCount++}`);
-        values.push(data.reminder_sunday_enabled);
+        fields.push('reminder_sunday_enabled = ?');
+        values.push(data.reminder_sunday_enabled ? 1 : 0);
       }
 
+      fields.push("updated_at = datetime('now')");
       values.push(id);
 
+      const result = await this.db.prepare(
+        `UPDATE workspaces SET ${fields.join(', ')} WHERE workspace_id = ?`
+      ).bind(...values).run();
+
+      if (!result.success) {
+        throw new Error('Failed to update workspace');
+      }
+
       const rows = await this.query<Workspace>(
-        `UPDATE workspaces SET ${fields.join(', ')}
-         WHERE workspace_id = $${paramCount}
-         RETURNING *`,
-        values
+        'SELECT * FROM workspaces WHERE workspace_id = ?',
+        [id]
       );
       return rows[0];
     },
@@ -350,7 +472,7 @@ export class Database implements IDatabase {
   players = {
     findById: async (id: number): Promise<Player | null> => {
       const rows = await this.query<Player>(
-        'SELECT * FROM players WHERE player_id = $1',
+        'SELECT * FROM players WHERE player_id = ?',
         [id]
       );
       return rows[0] || null;
@@ -358,32 +480,41 @@ export class Database implements IDatabase {
 
     findByWorkspaceAndPlatformUserId: async (workspaceId: number, platformUserId: string): Promise<Player | null> => {
       const rows = await this.query<Player>(
-        'SELECT * FROM players WHERE workspace_id = $1 AND platform_user_id = $2',
+        'SELECT * FROM players WHERE workspace_id = ? AND platform_user_id = ?',
         [workspaceId, platformUserId]
       );
       return rows[0] || null;
     },
 
     findByWorkspace: async (workspaceId: number): Promise<Player[]> => {
-      const rows = await this.query<Player>(
-        'SELECT * FROM players WHERE workspace_id = $1 ORDER BY display_name',
+      return this.query<Player>(
+        'SELECT * FROM players WHERE workspace_id = ? ORDER BY display_name',
         [workspaceId]
       );
-      return rows;
     },
 
     create: async (data: Partial<Player>): Promise<Player> => {
-      const rows = await this.query<Player>(
+      const result = await this.db.prepare(
         `INSERT INTO players (
           workspace_id, platform_user_id, display_name, 
           is_admin, joined_week_id
          )
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING *`,
-        [
-          data.workspace_id, data.platform_user_id, data.display_name,
-          data.is_admin ?? false, data.joined_week_id || null
-        ]
+         VALUES (?, ?, ?, ?, ?)`
+      ).bind(
+        data.workspace_id, 
+        data.platform_user_id, 
+        data.display_name,
+        data.is_admin ? 1 : 0,  // SQLite: 1 = true, 0 = false
+        data.joined_week_id || null
+      ).run();
+
+      if (!result.success) {
+        throw new Error('Failed to create player');
+      }
+
+      const rows = await this.query<Player>(
+        'SELECT * FROM players WHERE player_id = ?',
+        [result.meta.last_row_id]
       );
       return rows[0];
     },
@@ -391,28 +522,34 @@ export class Database implements IDatabase {
     update: async (id: number, data: Partial<Player>): Promise<Player> => {
       const fields: string[] = [];
       const values: any[] = [];
-      let paramCount = 1;
 
       if (data.display_name !== undefined) {
-        fields.push(`display_name = $${paramCount++}`);
+        fields.push('display_name = ?');
         values.push(data.display_name);
       }
       if (data.is_admin !== undefined) {
-        fields.push(`is_admin = $${paramCount++}`);
-        values.push(data.is_admin);
+        fields.push('is_admin = ?');
+        values.push(data.is_admin ? 1 : 0);
       }
       if (data.joined_week_id !== undefined) {
-        fields.push(`joined_week_id = $${paramCount++}`);
+        fields.push('joined_week_id = ?');
         values.push(data.joined_week_id);
       }
 
+      fields.push("updated_at = datetime('now')");
       values.push(id);
 
+      const result = await this.db.prepare(
+        `UPDATE players SET ${fields.join(', ')} WHERE player_id = ?`
+      ).bind(...values).run();
+
+      if (!result.success) {
+        throw new Error('Failed to update player');
+      }
+
       const rows = await this.query<Player>(
-        `UPDATE players SET ${fields.join(', ')}
-         WHERE player_id = $${paramCount}
-         RETURNING *`,
-        values
+        'SELECT * FROM players WHERE player_id = ?',
+        [id]
       );
       return rows[0];
     },
@@ -420,11 +557,16 @@ export class Database implements IDatabase {
 
   /**
    * Pick operations
+   * 
+   * IMPORTANT: Validation logic from PostgreSQL triggers must be handled in PickService:
+   * 1. check_no_repeat_teams: Validate player hasn't picked this team in the season
+   * 2. check_team_plays_in_week: Validate team has a game in the week
+   * 3. update_picks_updated_at: Manually set updated_at on updates
    */
   picks = {
     findById: async (id: number): Promise<Pick | null> => {
       const rows = await this.query<Pick>(
-        'SELECT * FROM picks WHERE id = $1',
+        'SELECT * FROM picks WHERE pick_id = ?',
         [id]
       );
       return rows[0] || null;
@@ -432,50 +574,58 @@ export class Database implements IDatabase {
 
     findByWeekAndPlayer: async (weekId: number, playerId: number): Promise<Pick | null> => {
       const rows = await this.query<Pick>(
-        'SELECT * FROM picks WHERE week_id = $1 AND player_id = $2',
+        'SELECT * FROM picks WHERE week_id = ? AND player_id = ?',
         [weekId, playerId]
       );
       return rows[0] || null;
     },
 
     findByPlayer: async (playerId: number): Promise<Pick[]> => {
-      const rows = await this.query<Pick>(
-        'SELECT * FROM picks WHERE player_id = $1 ORDER BY week_id',
+      return this.query<Pick>(
+        'SELECT * FROM picks WHERE player_id = ? ORDER BY week_id',
         [playerId]
       );
-      return rows;
     },
 
     findByWeek: async (weekId: number): Promise<Pick[]> => {
-      const rows = await this.query<Pick>(
-        'SELECT * FROM picks WHERE week_id = $1',
+      return this.query<Pick>(
+        'SELECT * FROM picks WHERE week_id = ?',
         [weekId]
       );
-      return rows;
     },
 
     findBySeason: async (seasonId: number, playerId: number): Promise<Pick[]> => {
-      const rows = await this.query<Pick>(
+      return this.query<Pick>(
         `SELECT p.* FROM picks p
-         JOIN weeks w ON p.week_id = w.id
-         WHERE w.season_id = $1 AND p.player_id = $2
+         JOIN weeks w ON p.week_id = w.week_id
+         WHERE w.season_id = ? AND p.player_id = ?
          ORDER BY w.week_number`,
         [seasonId, playerId]
       );
-      return rows;
     },
 
     create: async (data: Partial<Pick>): Promise<Pick> => {
-      const rows = await this.query<Pick>(
+      const result = await this.db.prepare(
         `INSERT INTO picks (
           week_id, player_id, team_id, source, locked_at, outcome
          )
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING *`,
-        [
-          data.week_id, data.player_id, data.team_id,
-          data.source || 'manual', data.locked_at || null, data.outcome || null
-        ]
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(
+        data.week_id, 
+        data.player_id, 
+        data.team_id,
+        data.source || 'manual', 
+        data.locked_at || null, 
+        data.outcome || null
+      ).run();
+
+      if (!result.success) {
+        throw new Error('Failed to create pick');
+      }
+
+      const rows = await this.query<Pick>(
+        'SELECT * FROM picks WHERE pick_id = ?',
+        [result.meta.last_row_id]
       );
       return rows[0];
     },
@@ -483,34 +633,47 @@ export class Database implements IDatabase {
     update: async (id: number, data: Partial<Pick>): Promise<Pick> => {
       const fields: string[] = [];
       const values: any[] = [];
-      let paramCount = 1;
 
       if (data.team_id !== undefined) {
-        fields.push(`team_id = $${paramCount++}`);
+        fields.push('team_id = ?');
         values.push(data.team_id);
       }
       if (data.locked_at !== undefined) {
-        fields.push(`locked_at = $${paramCount++}`);
+        fields.push('locked_at = ?');
         values.push(data.locked_at);
       }
       if (data.outcome !== undefined) {
-        fields.push(`outcome = $${paramCount++}`);
+        fields.push('outcome = ?');
         values.push(data.outcome);
       }
 
+      // Manually set updated_at (no trigger in D1)
+      fields.push("updated_at = datetime('now')");
       values.push(id);
 
+      const result = await this.db.prepare(
+        `UPDATE picks SET ${fields.join(', ')} WHERE pick_id = ?`
+      ).bind(...values).run();
+
+      if (!result.success) {
+        throw new Error('Failed to update pick');
+      }
+
       const rows = await this.query<Pick>(
-        `UPDATE picks SET ${fields.join(', ')}
-         WHERE pick_id = $${paramCount}
-         RETURNING *`,
-        values
+        'SELECT * FROM picks WHERE pick_id = ?',
+        [id]
       );
       return rows[0];
     },
 
     delete: async (id: number): Promise<void> => {
-      await this.query('DELETE FROM picks WHERE pick_id = $1', [id]);
+      const result = await this.db.prepare(
+        'DELETE FROM picks WHERE pick_id = ?'
+      ).bind(id).run();
+
+      if (!result.success) {
+        throw new Error('Failed to delete pick');
+      }
     },
   };
 
@@ -520,28 +683,39 @@ export class Database implements IDatabase {
   standings = {
     findBySeasonAndPlayer: async (seasonId: number, playerId: number): Promise<Standing | null> => {
       const rows = await this.query<Standing>(
-        'SELECT * FROM standings WHERE season_id = $1 AND player_id = $2',
+        'SELECT * FROM standings WHERE season_id = ? AND player_id = ?',
         [seasonId, playerId]
       );
       return rows[0] || null;
     },
 
     findBySeason: async (seasonId: number): Promise<Standing[]> => {
-      const rows = await this.query<Standing>(
+      return this.query<Standing>(
         `SELECT * FROM standings 
-         WHERE season_id = $1 
+         WHERE season_id = ? 
          ORDER BY wins DESC, losses ASC`,
         [seasonId]
       );
-      return rows;
     },
 
     create: async (data: Partial<Standing>): Promise<Standing> => {
-      const rows = await this.query<Standing>(
+      const result = await this.db.prepare(
         `INSERT INTO standings (season_id, player_id, wins, losses)
-         VALUES ($1, $2, $3, $4)
-         RETURNING *`,
-        [data.season_id, data.player_id, data.wins || 0, data.losses || 0]
+         VALUES (?, ?, ?, ?)`
+      ).bind(
+        data.season_id, 
+        data.player_id, 
+        data.wins || 0, 
+        data.losses || 0
+      ).run();
+
+      if (!result.success) {
+        throw new Error('Failed to create standing');
+      }
+
+      const rows = await this.query<Standing>(
+        'SELECT * FROM standings WHERE standing_id = ?',
+        [result.meta.last_row_id]
       );
       return rows[0];
     },
@@ -549,24 +723,29 @@ export class Database implements IDatabase {
     update: async (id: number, data: Partial<Standing>): Promise<Standing> => {
       const fields: string[] = [];
       const values: any[] = [];
-      let paramCount = 1;
 
       if (data.wins !== undefined) {
-        fields.push(`wins = $${paramCount++}`);
+        fields.push('wins = ?');
         values.push(data.wins);
       }
       if (data.losses !== undefined) {
-        fields.push(`losses = $${paramCount++}`);
+        fields.push('losses = ?');
         values.push(data.losses);
       }
 
       values.push(id);
 
+      const result = await this.db.prepare(
+        `UPDATE standings SET ${fields.join(', ')} WHERE standing_id = ?`
+      ).bind(...values).run();
+
+      if (!result.success) {
+        throw new Error('Failed to update standing');
+      }
+
       const rows = await this.query<Standing>(
-        `UPDATE standings SET ${fields.join(', ')}
-         WHERE standing_id = $${paramCount}
-         RETURNING *`,
-        values
+        'SELECT * FROM standings WHERE standing_id = ?',
+        [id]
       );
       return rows[0];
     },
@@ -574,34 +753,62 @@ export class Database implements IDatabase {
 
   /**
    * Audit log operations
+   * 
+   * Note: payload is stored as TEXT in D1 (was JSONB in PostgreSQL)
+   * Use JSON.stringify() when creating, JSON.parse() when reading
    */
   auditLog = {
     create: async (data: Partial<AuditLog>): Promise<AuditLog> => {
-      const rows = await this.query<AuditLog>(
+      const result = await this.db.prepare(
         `INSERT INTO audit_log (
           workspace_id, actor_type, actor_id, action, 
           entity_type, entity_id, payload
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING *`,
-        [
-          data.workspace_id, data.actor_type, data.actor_id || null, data.action,
-          data.entity_type || null, data.entity_id || null,
-          data.payload || null
-        ]
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        data.workspace_id, 
+        data.actor_type, 
+        data.actor_id || null, 
+        data.action,
+        data.entity_type || null, 
+        data.entity_id || null,
+        data.payload ? JSON.stringify(data.payload) : null
+      ).run();
+
+      if (!result.success) {
+        throw new Error('Failed to create audit log');
+      }
+
+      const rows = await this.query<AuditLog>(
+        'SELECT * FROM audit_log WHERE log_id = ?',
+        [result.meta.last_row_id]
       );
-      return rows[0];
+      
+      // Parse payload back to object
+      const row = rows[0];
+      if (row && row.payload && typeof row.payload === 'string') {
+        row.payload = JSON.parse(row.payload);
+      }
+      
+      return row;
     },
 
     findByWorkspace: async (workspaceId: number, limit: number = 100): Promise<AuditLog[]> => {
       const rows = await this.query<AuditLog>(
         `SELECT * FROM audit_log 
-         WHERE workspace_id = $1 
+         WHERE workspace_id = ? 
          ORDER BY created_at DESC 
-         LIMIT $2`,
+         LIMIT ?`,
         [workspaceId, limit]
       );
-      return rows;
+      
+      // Parse payload for each row
+      return rows.map(row => {
+        if (row.payload && typeof row.payload === 'string') {
+          row.payload = JSON.parse(row.payload);
+        }
+        return row;
+      });
     },
   };
 }
