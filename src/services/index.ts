@@ -11,6 +11,7 @@ export { StandingsService } from './StandingsService';
 export { GameService } from './GameService';
 export { ArchiveService } from './ArchiveService';
 export { RenderService } from './RenderService';
+export { SchedulerService } from './SchedulerService';
 
 // Export interfaces
 export * from './interfaces/IAuditService';
@@ -21,3 +22,4 @@ export * from './interfaces/IGameService';
 export * from './interfaces/IArchiveService';
 export * from './interfaces/IRenderService';
 export * from './interfaces/IDatabase';
+export * from './interfaces/ISchedulerService';

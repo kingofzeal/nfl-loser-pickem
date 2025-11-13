@@ -19,6 +19,7 @@ import {
   StandingsService,
   GameService,
   RenderService,
+  SchedulerService
 } from './services';
 
 // Command handlers
@@ -39,6 +40,7 @@ function createServices(db: Database) {
   const standingsService = new StandingsService(db, auditService);
   const gameService = new GameService(db, auditService);
   const renderService = new RenderService();
+  const schedulerService = new SchedulerService(db, weekService, gameService);
 
   return {
     db,
@@ -48,6 +50,7 @@ function createServices(db: Database) {
     standingsService,
     gameService,
     renderService,
+    schedulerService,
   };
 }
 
@@ -137,19 +140,8 @@ export default {
         scheduledTime: new Date(event.scheduledTime).toISOString(),
       });
       
-      // Determine which cron job this is
-      const hour = new Date(event.scheduledTime).getUTCHours();
-      
-      if (hour === 9) {
-        // Tuesday 9 AM UTC - Week lock and auto-assign
-        await handleWeekLockCron(services, env);
-      } else if (hour === 4) {
-        // Tuesday 4 AM UTC - Post-MNF standings update
-        await handleStandingsUpdateCron(services, env);
-      } else {
-        // Hourly game sync
-        await handleGameSyncCron(services, env);
-      }
+      // Run all scheduled jobs
+      await services.schedulerService.runScheduledJobs();
       
       logger.info('Cron trigger completed successfully');
     } catch (error) {

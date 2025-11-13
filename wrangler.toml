@@ -39,14 +39,20 @@ LOG_LEVEL = "info"
 
 # Cron triggers for scheduled tasks
 [[triggers.crons]]
-# Every Tuesday at 5 AM EST (10 AM UTC during standard time, 9 AM UTC during DST)
-# Adjust based on when week locks typically happen
-cron = "0 9 * * TUE"
+# Every hour during NFL season (for game score updates)
+cron = "0 * * * *"
 
 [[triggers.crons]]
-# Every Monday at 11 PM EST (4 AM UTC Tuesday) - post-week processing
-# For updating standings after Monday Night Football
-cron = "0 4 * * TUE"
+# Every 15 minutes on Sunday (for live game tracking)
+cron = "*/15 * * * SUN"
+
+[[triggers.crons]]
+# Every 15 minutes on Monday evening (for MNF tracking)
+cron = "*/15 18-23 * * MON"
+
+[[triggers.crons]]
+# Every 15 minutes on Thursday evening (for TNF tracking)
+cron = "*/15 18-23 * * THU"
 
 # Development environment overrides
 [env.dev]
