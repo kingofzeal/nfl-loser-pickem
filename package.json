@@ -31,32 +31,34 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@slack/bolt": "^3.17.0",
-    "discord.js": "^14.14.1",
-    "dotenv": "^16.4.1",
     "axios": "^1.6.5",
     "date-fns": "^3.6.0",
-    "date-fns-tz": "^3.2.0"
+    "date-fns-tz": "^3.2.0",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.1",
+    "satori": "^0.18.3"
   },
   "optionalDependencies": {
     "canvas": "^2.11.2"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/jest": "^29.5.14",
     "@types/node": "^22.9.0",
     "@types/node-cron": "^3.0.11",
-    "@types/jest": "^29.5.14",
-    "@cloudflare/workers-types": "^4.20241127.0",
-    "typescript": "^5.6.3",
-    "tsx": "^4.19.0",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.2.5",
     "@typescript-eslint/eslint-plugin": "^8.11.0",
     "@typescript-eslint/parser": "^8.11.0",
-    "eslint": "^9.13.0",
-    "prettier": "^3.3.3",
-    "wrangler": "^3.86.1",
     "better-sqlite3": "^11.7.0",
-    "@types/better-sqlite3": "^7.6.12"
+    "eslint": "^9.13.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.3.3",
+    "ts-jest": "^29.2.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3",
+    "wrangler": "^3.86.1"
   },
   "engines": {
     "node": ">=22.0.0",

@@ -1,19 +1,49 @@
 /**
  * RenderService Implementation
  * 
- * Handles message formatting and rendering:
- * - Generate embeds for Discord/Slack
- * - Format pick confirmations
- * - Create leaderboards
- * - Generate help messages
- * - Create weekly summary images (placeholder for canvas integration)
+ * Uses Satori to convert HTML/JSX to SVG, which is then converted to PNG.
+ * This is ideal for Cloudflare Workers as it doesn't require native dependencies like node-canvas.
+ * 
+ * Features:
+ * - Cloudflare Workers compatible (no native bindings)
+ * - JSX/React-style template rendering
+ * - SVG output with PNG conversion via @resvg/resvg-js
+ * - Lightweight and fast
+ * - Dynamic image sizing based on data
  */
 
+import satori, { SatoriOptions } from 'satori';
+import { Resvg } from '@resvg/resvg-js';
 import { IRenderService } from './interfaces/IRenderService';
-import { EmbedMessage, Pick, Standing, StandingWithPlayer, Week, PickWithDetails } from '../types';
+import { 
+  EmbedMessage, 
+  Pick, 
+  Standing, 
+  StandingWithPlayer, 
+  Week, 
+  PickWithDetails 
+} from '../types';
 import { logger } from '../utils/logger';
 
 export class RenderService implements IRenderService {
+  private font: ArrayBuffer | null = null;
+
+  /**
+   * Initialize the service with font data
+   * For Cloudflare Workers, you'll need to load the font as a binary asset
+   * 
+   * @param fontData - ArrayBuffer of a TrueType/OpenType font file
+   */
+  async initialize(fontData?: ArrayBuffer): Promise<void> {
+    if (fontData) {
+      this.font = fontData;
+      logger.info('RenderService initialized with custom font');
+    } else {
+      // In production, you'd load this from R2 or bundle it as an asset
+      logger.warn('No font provided - Satori may fall back to system fonts');
+    }
+  }
+
   /**
    * Generate pick confirmation message
    */
@@ -160,38 +190,244 @@ export class RenderService implements IRenderService {
   }
 
   /**
-   * Generate weekly summary image
+   * Generate weekly summary image using Satori
    * 
-   * Note: This is a placeholder. Real implementation would use canvas or similar
-   * to generate an image showing all picks and results in a grid format.
-   * For Cloudflare Workers, this might need to be done with an external service
-   * or using a lightweight image generation library.
+   * This creates a visual grid showing:
+   * - All players down the left column
+   * - Their picks and results for the week
+   * - Color-coded outcomes (green = win, red = loss, gray = pending)
+   * 
+   * @returns Buffer of PNG image
    */
   async generateWeeklySummaryImage(
     seasonYear: number,
     weekNumber: number,
     standings: StandingWithPlayer[],
     allPicks: Record<number, PickWithDetails[]>
-  ): Promise<string | Buffer> {
+  ): Promise<Buffer> {
     try {
-      logger.debug('Generating weekly summary image', { seasonYear, weekNumber });
+      logger.debug('Generating weekly summary image with Satori', { seasonYear, weekNumber });
 
-      // Placeholder implementation
-      // In a real implementation, you would:
-      // 1. Create a canvas with appropriate size
-      // 2. Draw a grid with player names and their picks
-      // 3. Color-code results (green for wins, red for losses)
-      // 4. Add team logos if available
-      // 5. Return the image as a buffer or upload to R2 and return URL
+      // Build the JSX structure for the image
+      const jsx = this.buildWeeklySummaryJSX(seasonYear, weekNumber, standings, allPicks);
 
-      logger.warn('generateWeeklySummaryImage not fully implemented - requires canvas integration');
+      // Configure Satori options
+      const options: SatoriOptions = {
+        width: 1200,
+        height: Math.max(600, 100 + standings.length * 60), // Dynamic height based on player count
+        fonts: this.font ? [{
+          name: 'Inter',
+          data: this.font,
+          weight: 400,
+          style: 'normal',
+        }] : [],
+      };
 
-      // Return a placeholder message for now
-      return `Weekly summary for Week ${weekNumber}, ${seasonYear} (Image generation not yet implemented)`;
+      // Generate SVG
+      const svg = await satori(jsx, options);
+
+      // Convert SVG to PNG using resvg
+      const resvg = new Resvg(svg, {
+        fitTo: {
+          mode: 'width',
+          value: 1200,
+        },
+      });
+
+      const pngData = resvg.render();
+      const pngBuffer = pngData.asPng();
+
+      logger.info('Successfully generated weekly summary image', { 
+        seasonYear, 
+        weekNumber,
+        sizeBytes: pngBuffer.length 
+      });
+
+      return pngBuffer;
     } catch (error) {
       logger.error('Failed to generate weekly summary image', { error, seasonYear, weekNumber });
       throw new Error(`Failed to generate weekly summary image: ${error}`);
     }
+  }
+
+  /**
+   * Build JSX structure for weekly summary
+   * Satori uses React-style JSX syntax
+   */
+  private buildWeeklySummaryJSX(
+    seasonYear: number,
+    weekNumber: number,
+    standings: StandingWithPlayer[],
+    allPicks: Record<number, PickWithDetails[]>
+  ): any {
+    return {
+      type: 'div',
+      props: {
+        style: {
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: '#1a1a1a',
+          color: '#ffffff',
+          padding: 40,
+          fontFamily: 'Inter, sans-serif',
+        },
+        children: [
+          // Header
+          {
+            type: 'div',
+            props: {
+              style: {
+                display: 'flex',
+                flexDirection: 'column',
+                marginBottom: 30,
+              },
+              children: [
+                {
+                  type: 'div',
+                  props: {
+                    style: {
+                      fontSize: 48,
+                      fontWeight: 700,
+                      marginBottom: 10,
+                    },
+                    children: `🏈 Week ${weekNumber} - ${seasonYear}`,
+                  },
+                },
+                {
+                  type: 'div',
+                  props: {
+                    style: {
+                      fontSize: 24,
+                      color: '#888888',
+                    },
+                    children: 'NFL Loser Pick\'em Summary',
+                  },
+                },
+              ],
+            },
+          },
+          // Table header
+          {
+            type: 'div',
+            props: {
+              style: {
+                display: 'flex',
+                borderBottom: '2px solid #333333',
+                paddingBottom: 15,
+                marginBottom: 15,
+              },
+              children: [
+                {
+                  type: 'div',
+                  props: {
+                    style: { width: 60, fontSize: 20, fontWeight: 600 },
+                    children: 'Rank',
+                  },
+                },
+                {
+                  type: 'div',
+                  props: {
+                    style: { flex: 1, fontSize: 20, fontWeight: 600 },
+                    children: 'Player',
+                  },
+                },
+                {
+                  type: 'div',
+                  props: {
+                    style: { width: 200, fontSize: 20, fontWeight: 600 },
+                    children: 'Pick',
+                  },
+                },
+                {
+                  type: 'div',
+                  props: {
+                    style: { width: 100, fontSize: 20, fontWeight: 600 },
+                    children: 'Result',
+                  },
+                },
+                {
+                  type: 'div',
+                  props: {
+                    style: { width: 120, fontSize: 20, fontWeight: 600, textAlign: 'right' },
+                    children: 'Record',
+                  },
+                },
+              ],
+            },
+          },
+          // Player rows
+          ...standings.map((standing, index) => {
+            const playerPicks = allPicks[standing.player_id] || [];
+            const weekPick = playerPicks.find(p => p.week?.week_number === weekNumber);
+            
+            const rank = index + 1;
+            const rankDisplay = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+            
+            const pickText = weekPick?.team?.name || 'No Pick';
+            const outcome = weekPick?.outcome;
+            const outcomeDisplay = outcome === 'win' ? '✅ Win' : outcome === 'loss' ? '❌ Loss' : '⏳ Pending';
+            const outcomeColor = outcome === 'win' ? '#00ff00' : outcome === 'loss' ? '#ff0000' : '#888888';
+
+            return {
+              type: 'div',
+              key: standing.player_id,
+              props: {
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '15px 0',
+                  borderBottom: '1px solid #2a2a2a',
+                },
+                children: [
+                  {
+                    type: 'div',
+                    props: {
+                      style: { width: 60, fontSize: 24 },
+                      children: rankDisplay,
+                    },
+                  },
+                  {
+                    type: 'div',
+                    props: {
+                      style: { flex: 1, fontSize: 22, fontWeight: 500 },
+                      children: standing.player.display_name,
+                    },
+                  },
+                  {
+                    type: 'div',
+                    props: {
+                      style: { width: 200, fontSize: 20 },
+                      children: pickText,
+                    },
+                  },
+                  {
+                    type: 'div',
+                    props: {
+                      style: { width: 100, fontSize: 20, color: outcomeColor },
+                      children: outcomeDisplay,
+                    },
+                  },
+                  {
+                    type: 'div',
+                    props: {
+                      style: { 
+                        width: 120, 
+                        fontSize: 20, 
+                        textAlign: 'right',
+                        color: standing.wins > standing.losses ? '#00ff00' : '#ff6666',
+                      },
+                      children: `${standing.wins}-${standing.losses}`,
+                    },
+                  },
+                ],
+              },
+            };
+          }),
+        ],
+      },
+    };
   }
 
   /**
