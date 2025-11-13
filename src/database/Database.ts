@@ -464,6 +464,10 @@ export class Database implements IDatabase {
       );
       return rows[0];
     },
+
+    findAll: async (): Promise<Workspace[]> => {
+      return this.query<Workspace>('SELECT * FROM workspaces');
+    },
   };
 
   /**

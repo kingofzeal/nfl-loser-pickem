@@ -51,6 +51,7 @@ export interface IDatabase {
   workspaces: {
     findById(id: number): Promise<Workspace | null>;
     findByPlatformId(platform: string, platformWorkspaceId: string): Promise<Workspace | null>;
+    findAll(): Promise<Workspace[]>;
     create(data: Partial<Workspace>): Promise<Workspace>;
     update(id: number, data: Partial<Workspace>): Promise<Workspace>;
   };
