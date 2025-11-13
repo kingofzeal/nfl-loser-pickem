@@ -28,17 +28,25 @@ export function getTestDb(): Database.Database {
       if (file.endsWith('.sql')) {
         const sql = readFileSync(join(migrationsDir, file), 'utf-8');
         
-        // Split on semicolons and execute each statement
-        const statements = sql
+        // Remove comments and split on semicolons
+        const cleanedSql = sql
+          .split('\n')
+          .filter(line => !line.trim().startsWith('--'))
+          .join('\n');
+        
+        // Split on semicolons but keep statements together
+        const statements = cleanedSql
           .split(';')
           .map(s => s.trim())
-          .filter(s => s.length > 0 && !s.startsWith('--'));
+          .filter(s => s.length > 0);
         
+        // Execute all statements in the file (use exec for multiple statements)
         for (const stmt of statements) {
           try {
             testDb.exec(stmt);
           } catch (error) {
             console.error(`Error executing statement from ${file}:`, error);
+            console.error('Statement:', stmt);
             throw error;
           }
         }
