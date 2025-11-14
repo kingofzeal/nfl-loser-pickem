@@ -212,32 +212,66 @@ export class AdminCommandHandler implements ICommandHandler {
 
     // Sync all weeks if "all" is specified
     if (args.length > 0 && args[0].toLowerCase() === 'all') {
-      const weeks = await this.db.weeks.findBySeason(season.season_id);
+      const allWeeks = await this.db.weeks.findBySeason(season.season_id);
       
-      if (weeks.length === 0) {
+      if (allWeeks.length === 0) {
         return {
           type: 'ephemeral',
           content: this.renderService.generateError('No weeks found for current season.')
         };
       }
 
-      let successCount = 0;
-      let errorCount = 0;
-      const errors: string[] = [];
-
-      for (const week of weeks) {
-        try {
-          await this.gameService.syncGames(week.week_id);
-          successCount++;
-        } catch (error) {
-          errorCount++;
-          errors.push(`Week ${week.week_number}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
+      // Only sync weeks that have started or are about to start (not far-future weeks with no games)
+      // This avoids syncing 18 weeks when only 1-12 have game data
+      const now = new Date();
+      const oneWeekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      
+      // Get the current week number to determine which weeks to sync
+      const currentWeekNumber = allWeeks.find(w => w.state === 'open' || w.state === 'in_progress')?.week_number || 1;
+      
+      // Sync current week and all previous weeks (up to current + 1 for upcoming games)
+      const weeks = allWeeks.filter(w => w.week_number <= currentWeekNumber + 1);
+      
+      if (weeks.length === 0) {
+        return {
+          type: 'ephemeral',
+          content: this.renderService.generateError('No weeks to sync.')
+        };
       }
 
+      // Sync weeks in parallel (in batches to avoid overwhelming ESPN API)
+      const BATCH_SIZE = 3; // Sync 3 weeks at a time
+      const results: { week: number; success: boolean; error?: string }[] = [];
+      
+      for (let i = 0; i < weeks.length; i += BATCH_SIZE) {
+        const batch = weeks.slice(i, i + BATCH_SIZE);
+        const batchPromises = batch.map(async (week) => {
+          try {
+            await this.gameService.syncGames(week.week_id);
+            return { week: week.week_number, success: true };
+          } catch (error) {
+            return {
+              week: week.week_number,
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error'
+            };
+          }
+        });
+        
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
+      }
+
+      const successCount = results.filter(r => r.success).length;
+      const errorCount = results.filter(r => !r.success).length;
+      const errors = results.filter(r => !r.success).map(r => `Week ${r.week}: ${r.error}`);
+
+      const skippedCount = allWeeks.length - weeks.length;
+      const skippedNote = skippedCount > 0 ? `\n\n_Skipped ${skippedCount} future weeks with no games yet._` : '';
+
       const resultText = errorCount > 0
-        ? `Synced ${successCount} of ${weeks.length} weeks.\n\n*Errors:*\n${errors.join('\n')}`
-        : `Successfully synced all ${successCount} weeks.`;
+        ? `Synced ${successCount} of ${weeks.length} weeks.${skippedNote}\n\n*Errors:*\n${errors.join('\n')}`
+        : `Successfully synced all ${successCount} weeks (Weeks 1-${weeks[weeks.length - 1].week_number}).${skippedNote}`;
 
       return {
         type: 'ephemeral',
@@ -250,11 +284,74 @@ export class AdminCommandHandler implements ICommandHandler {
 
     // If week number provided, sync that week only
     if (args.length > 0) {
+      // Check for range format: "1-11"
+      const rangeMatch = args[0].match(/^(\d+)-(\d+)$/);
+      if (rangeMatch) {
+        const startWeek = parseInt(rangeMatch[1]);
+        const endWeek = parseInt(rangeMatch[2]);
+        
+        if (startWeek > endWeek) {
+          return {
+            type: 'ephemeral',
+            content: this.renderService.generateError('Start week must be less than or equal to end week.')
+          };
+        }
+
+        const allWeeks = await this.db.weeks.findBySeason(season.season_id);
+        const weeks = allWeeks.filter(w => w.week_number >= startWeek && w.week_number <= endWeek);
+        
+        if (weeks.length === 0) {
+          return {
+            type: 'ephemeral',
+            content: this.renderService.generateError(`No weeks found in range ${startWeek}-${endWeek}.`)
+          };
+        }
+
+        // Sync weeks in parallel (in batches)
+        const BATCH_SIZE = 3;
+        const results: { week: number; success: boolean; error?: string }[] = [];
+        
+        for (let i = 0; i < weeks.length; i += BATCH_SIZE) {
+          const batch = weeks.slice(i, i + BATCH_SIZE);
+          const batchPromises = batch.map(async (week) => {
+            try {
+              await this.gameService.syncGames(week.week_id);
+              return { week: week.week_number, success: true };
+            } catch (error) {
+              return {
+                week: week.week_number,
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
+              };
+            }
+          });
+          
+          const batchResults = await Promise.all(batchPromises);
+          results.push(...batchResults);
+        }
+
+        const successCount = results.filter(r => r.success).length;
+        const errorCount = results.filter(r => !r.success).length;
+        const errors = results.filter(r => !r.success).map(r => `Week ${r.week}: ${r.error}`);
+
+        const resultText = errorCount > 0
+          ? `Synced ${successCount} of ${weeks.length} weeks (${startWeek}-${endWeek}).\n\n*Errors:*\n${errors.join('\n')}`
+          : `Successfully synced weeks ${startWeek}-${endWeek} (${successCount} weeks).`;
+
+        return {
+          type: 'ephemeral',
+          content: { 
+            title: errorCount > 0 ? '⚠️ Sync Completed with Errors' : '✅ Sync Complete',
+            description: resultText
+          }
+        };
+      }
+
       const weekNumber = parseInt(args[0]);
       if (isNaN(weekNumber)) {
         return {
           type: 'ephemeral',
-          content: this.renderService.generateError('Invalid week number. Use a number or "all".')
+          content: this.renderService.generateError('Invalid week number. Use a number, range (e.g., "1-11"), or "all".')
         };
       }
 
