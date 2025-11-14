@@ -187,6 +187,45 @@ export class WeekService implements IWeekService {
         });
       }
 
+      // Season rollover: if all weeks in this season are finalized, mark season completed and create upcoming season
+      const seasonWeeks = await this.db.weeks.findBySeason(week.season_id);
+      const allFinalized = seasonWeeks.every(w => w.state === 'finalized');
+      if (allFinalized) {
+        // Mark season completed
+        await this.db.seasons.update(week.season_id, { state: 'completed' });
+        for (const workspace of workspaces) {
+          await this.auditService.log({
+            workspace_id: workspace.workspace_id,
+            actor_type: 'system',
+            action: 'season_completed',
+            entity_type: 'season',
+            entity_id: week.season_id,
+            payload: { season_id: week.season_id },
+          });
+        }
+
+        // Create next season scaffold (upcoming)
+        const currentSeason = await this.db.seasons.findByYear(new Date().getFullYear());
+        if (currentSeason && currentSeason.season_id === week.season_id) {
+          const nextYear = currentSeason.year + 1;
+          const existingNext = await this.db.seasons.findByYear(nextYear);
+          if (!existingNext) {
+            const newSeason = await this.db.seasons.create({ year: nextYear, weeks_count: 18, state: 'upcoming' });
+            for (const workspace of workspaces) {
+              await this.auditService.log({
+                workspace_id: workspace.workspace_id,
+                actor_type: 'system',
+                action: 'season_initialized',
+                entity_type: 'season',
+                entity_id: newSeason.season_id,
+                payload: { season_id: newSeason.season_id, year: nextYear },
+              });
+            }
+            logger.info('Next season initialized', { year: nextYear, season_id: newSeason.season_id });
+          }
+        }
+      }
+
       logger.info('Week finalized', { 
         week_id: weekId,
         week_number: week.week_number,
@@ -381,9 +420,7 @@ export class WeekService implements IWeekService {
         // Filter players who had joined by this week
         const eligiblePlayers = players.filter(p => {
           if (!p.joined_week_id) return true; // Player was there from start
-          
-          // Check if player joined before or during this week
-          const joinedWeek = week.week_number;
+          // Player joined on or before this week (joined_week_id references week primary key)
           return p.joined_week_id <= week.week_id;
         });
         

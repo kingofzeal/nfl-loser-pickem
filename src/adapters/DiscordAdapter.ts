@@ -6,7 +6,7 @@
  */
 import { ICommandHandler } from '../commands/interfaces/ICommandHandler';
 import { logger } from '../utils/logger';
-import { CommandContext, CommandResponse, EmbedMessage, BlockMessage, Workspace, Player } from '../types';
+import { CommandContext, CommandResponse, Workspace, Player } from '../types';
 import { Database } from '../database/Database';
 
 export class DiscordAdapter {

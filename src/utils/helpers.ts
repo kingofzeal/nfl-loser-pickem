@@ -1,4 +1,4 @@
-import { format as formatDate, parseISO } from 'date-fns';
+import { parseISO } from 'date-fns';
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 
 /**

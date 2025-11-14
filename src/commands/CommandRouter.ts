@@ -8,7 +8,7 @@
  * - Command registration and dynamic routing
  */
 
-import { ICommandRouter, ICommandHandler, Command } from './interfaces/ICommandHandler';
+import { ICommandRouter, ICommandHandler } from './interfaces/ICommandHandler';
 import { CommandContext, CommandResponse } from '../types';
 import { logger } from '../utils/logger';
 

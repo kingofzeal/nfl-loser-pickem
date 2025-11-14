@@ -95,6 +95,7 @@ export class SchedulerService implements ISchedulerService {
     const weeks = await this.db.weeks.findBySeason(seasons.season_id);
     for (const week of weeks) {
       if ((week.state === 'in_progress' || week.state === 'open') && week.close_at && new Date(week.close_at) <= now) {
+        // Treat weeks with zero games as not finalizable (even though NOT EXISTS would return true)
         const allFinal = await this.db.games.allFinalForWeek(week.week_id);
         if (allFinal) {
           await this.weekService.finalizeWeek(week.week_id);

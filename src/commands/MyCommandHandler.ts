@@ -16,11 +16,11 @@ export class MyCommandHandler implements ICommandHandler {
     private db: IDatabase
   ) {}
 
-  canExecute(context: CommandContext): boolean {
+  canExecute(_context: CommandContext): boolean {
     return true; // All players can view their own summary
   }
 
-  async execute(context: CommandContext, args: string[]): Promise<CommandResponse> {
+  async execute(context: CommandContext, _args: string[]): Promise<CommandResponse> {
     // Get active season
     const currentYear = new Date().getFullYear();
     const season = await this.db.seasons.findByYear(currentYear);

@@ -23,6 +23,7 @@ export interface IDatabase {
   
   // Season operations
   seasons: {
+    findById(id: number): Promise<Season | null>;
     findByYear(year: number): Promise<Season | null>;
     create(data: Partial<Season>): Promise<Season>;
     update(id: number, data: Partial<Season>): Promise<Season>;

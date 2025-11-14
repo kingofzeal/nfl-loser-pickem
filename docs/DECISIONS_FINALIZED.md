@@ -136,8 +136,10 @@ This document records all finalized design decisions for the NFL Loser Pick'em B
 1. ✅ Added `reminder_friday_enabled` and `reminder_sunday_enabled` to `workspaces`
 2. ✅ Removed `timezone_override` from `players` (workspace-wide only)
 3. ✅ Added `joined_week_id` to `players` for mid-season tracking
-4. ✅ Added trigger `check_team_plays_in_week()` to validate picks
+4. ✅ Implemented team-week validation (service/data layer for D1; original trigger concept documented but D1 has no triggers)
 5. ✅ Archive configuration added to config
+6. ✅ Simplified `teams` schema (removed `city`, `abbreviation`)
+7. ✅ Embedded `updated_at` columns directly in creation migrations
 
 ### Service Interface Updates
 1. ✅ `IPickService.assignRandomTeam()` - documented to use teams that won
@@ -158,7 +160,8 @@ This document records all finalized design decisions for the NFL Loser Pick'em B
 |------|-------------|
 | No repeat teams per season | Database trigger |
 | One pick per week | UNIQUE constraint |
-| Team must play in week | Database trigger (new) |
+| Team must play in week | Service validation (no D1 triggers) |
+| Empty weeks not finalizable | Database helper returns false on 0 games |
 | Pick locks at kickoff | Application logic |
 | Ties count as losses | Outcome calculation |
 | Mid-season joins allowed | Application logic |
@@ -178,4 +181,4 @@ This document records all finalized design decisions for the NFL Loser Pick'em B
 
 **Status:** All decisions finalized ✅  
 **Ready for:** Phase 2+ implementation  
-**Last Updated:** Based on DECISIONS.md review
+**Last Updated:** Embedded updated_at + team schema simplification applied

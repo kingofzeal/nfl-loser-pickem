@@ -1,0 +1,2 @@
+-- Deprecated migration (updated_at columns now defined in base create migrations)
+-- Intentionally left blank to avoid duplicate column errors.

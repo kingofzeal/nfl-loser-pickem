@@ -16,7 +16,7 @@ export class PickCommandHandler implements ICommandHandler {
     private db: IDatabase
   ) {}
 
-  canExecute(context: CommandContext): boolean {
+  canExecute(_context: CommandContext): boolean {
     return true; // All players can make picks
   }
 

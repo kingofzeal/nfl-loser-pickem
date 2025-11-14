@@ -65,15 +65,15 @@ export class AdminCommandHandler implements ICommandHandler {
     }
   }
 
-  private async seedSeason(context: CommandContext, args: string[]): Promise<CommandResponse> {
-    if (args.length === 0) {
+  private async seedSeason(_context: CommandContext, _args: string[]): Promise<CommandResponse> {
+    if (_args.length === 0) {
       return {
         type: 'ephemeral',
         content: this.renderService.generateError('Please specify a year. Usage: /nfl admin seed-season 2024')
       };
     }
 
-    const year = parseInt(args[0]);
+    const year = parseInt(_args[0]);
     if (isNaN(year)) {
       return {
         type: 'ephemeral',
@@ -182,7 +182,7 @@ export class AdminCommandHandler implements ICommandHandler {
     };
   }
 
-  private async setGame(context: CommandContext, args: string[]): Promise<CommandResponse> {
+  private async setGame(_context: CommandContext, _args: string[]): Promise<CommandResponse> {
     // TODO: Implement game override
     return {
       type: 'ephemeral',
@@ -190,7 +190,7 @@ export class AdminCommandHandler implements ICommandHandler {
     };
   }
 
-  private async resetPick(context: CommandContext, args: string[]): Promise<CommandResponse> {
+  private async resetPick(_context: CommandContext, _args: string[]): Promise<CommandResponse> {
     // TODO: Implement pick reset
     return {
       type: 'ephemeral',
@@ -261,7 +261,7 @@ export class AdminCommandHandler implements ICommandHandler {
     };
   }
 
-  private async config(context: CommandContext, args: string[]): Promise<CommandResponse> {
+  private async config(_context: CommandContext, _args: string[]): Promise<CommandResponse> {
     // TODO: Implement config management
     return {
       type: 'ephemeral',

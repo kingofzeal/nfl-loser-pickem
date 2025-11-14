@@ -137,10 +137,9 @@ export default {
    * - Tuesday 9 AM UTC: Lock weeks, auto-assign picks
    * - Tuesday 4 AM UTC: Update standings after MNF
    */
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     try {
-      const db = new Database(getD1Database(env));
-      const services = createServices(db, env);
+  const services = createServices(new Database(getD1Database(env)), env);
       
       logger.info('Cron trigger started', {
         cron: event.cron,
@@ -445,121 +444,13 @@ async function handleSlackEvent(
 /**
  * Process Slack event in background
  */
-async function processSlackEvent(event: any, env: Env): Promise<void> {
+async function processSlackEvent(event: any, _env: Env): Promise<void> {
   try {
-    const db = new Database(getD1Database(env));
-    
-    // TODO: Route to appropriate handler
+    // TODO: Route to appropriate handler (Slack support planned)
     logger.info('Slack event processed', { type: event.type });
   } catch (error) {
     logger.error('Slack event processing error', { error });
   }
 }
 
-/**
- * Cron: Lock weeks and auto-assign picks
- * Runs Tuesday 9 AM UTC
- */
-async function handleWeekLockCron(services: ReturnType<typeof createServices>, env: Env): Promise<void> {
-  logger.info('Week lock cron started');
-  
-  try {
-    // Get current season
-    const currentYear = new Date().getFullYear();
-    const season = await services.db.seasons.findByYear(currentYear);
-    
-    if (!season) {
-      logger.warn('No season found for current year');
-      return;
-    }
-    
-    // Find weeks that need to be locked
-    const weeks = await services.db.weeks.findBySeason(season.season_id);
-    
-    for (const week of weeks) {
-      if (week.state === 'open' || week.state === 'in_progress') {
-        // Check if all games have started
-        const hasStarted = await services.gameService.hasWeekStarted(week.week_id);
-        
-        if (hasStarted) {
-          // Close games that have kicked off
-          await services.weekService.closeGames(week.week_id);
-          logger.info('Games closed for week', { week_id: week.week_id });
-        }
-      }
-    }
-    
-    logger.info('Week lock cron completed');
-  } catch (error) {
-    logger.error('Week lock cron failed', { error });
-  }
-}
-
-/**
- * Cron: Update standings after games complete
- * Runs Tuesday 4 AM UTC (after Monday Night Football)
- */
-async function handleStandingsUpdateCron(services: ReturnType<typeof createServices>, env: Env): Promise<void> {
-  logger.info('Standings update cron started');
-  
-  try {
-    // Get current season
-    const currentYear = new Date().getFullYear();
-    const season = await services.db.seasons.findByYear(currentYear);
-    
-    if (!season) {
-      logger.warn('No season found for current year');
-      return;
-    }
-    
-    // Find weeks that are in_progress and all games are final
-    const weeks = await services.db.weeks.findBySeason(season.season_id);
-    
-    for (const week of weeks) {
-      if (week.state === 'in_progress') {
-        const allFinal = await services.weekService.areAllGamesFinal(week.week_id);
-        
-        if (allFinal) {
-          // Finalize the week (this handles missing picks and standings)
-          await services.weekService.finalizeWeek(week.week_id);
-          logger.info('Week finalized', { week_id: week.week_id });
-        }
-      }
-    }
-    
-    logger.info('Standings update cron completed');
-  } catch (error) {
-    logger.error('Standings update cron failed', { error });
-  }
-}
-
-/**
- * Cron: Sync game scores from ESPN
- * Runs hourly
- */
-async function handleGameSyncCron(services: ReturnType<typeof createServices>, env: Env): Promise<void> {
-  logger.info('Game sync cron started');
-  
-  try {
-    // Get current season
-    const currentYear = new Date().getFullYear();
-    const season = await services.db.seasons.findByYear(currentYear);
-    
-    if (!season) {
-      logger.warn('No season found for current year');
-      return;
-    }
-    
-    // Sync current week
-    const currentWeek = await services.weekService.getCurrentWeek(season.season_id);
-    
-    if (currentWeek) {
-      await services.gameService.syncGames(currentWeek.week_id);
-      logger.info('Games synced', { week_id: currentWeek.week_id });
-    }
-    
-    logger.info('Game sync cron completed');
-  } catch (error) {
-    logger.error('Game sync cron failed', { error });
-  }
-}
+// Legacy standalone cron helpers removed; SchedulerService.runScheduledJobs orchestrates all tasks.

@@ -29,6 +29,7 @@ CREATE TABLE standings (
   player_id INTEGER NOT NULL REFERENCES players(player_id) ON DELETE CASCADE,
   wins INTEGER NOT NULL DEFAULT 0,
   losses INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT DEFAULT (datetime('now')),
   UNIQUE (season_id, player_id)
 );
 

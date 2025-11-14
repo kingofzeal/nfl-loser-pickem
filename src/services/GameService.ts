@@ -30,9 +30,10 @@ export class GameService implements IGameService {
         throw new Error('Week not found');
       }
 
-      const season = await this.db.seasons.findByYear(new Date().getFullYear());
+      // Use the season associated with the week rather than system year (avoids test/env mismatch)
+      const season = await this.db.seasons.findById(week.season_id);
       if (!season) {
-        throw new Error('Current season not found');
+        throw new Error('Season for week not found');
       }
 
       const gameDataList: GameData[] = await this.provider.fetchGamesForWeek(week.week_number, season.year);
@@ -121,8 +122,8 @@ export class GameService implements IGameService {
     const existingGame = await this.db.games.findByExternalId(gameData.externalId);
 
     if (existingGame) {
+      // Only update mutable fields; avoid resetting kickoff_time to reduce chance of provider formatting issues
       await this.db.games.update(existingGame.game_id, {
-        kickoff_time: kickoffTime,
         status,
         home_score: homeScore,
         away_score: awayScore,

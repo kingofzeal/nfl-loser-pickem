@@ -14,7 +14,7 @@ export class BoardCommandHandler implements ICommandHandler {
     private db: IDatabase
   ) {}
 
-  canExecute(context: CommandContext): boolean {
+  canExecute(_context: CommandContext): boolean {
     return true; // All players can view the board
   }
 

@@ -11,7 +11,7 @@
 import { IPickService } from './interfaces/IPickService';
 import { IDatabase } from './interfaces/IDatabase';
 import { IAuditService } from './interfaces/IAuditService';
-import { Pick, Player, Team, ValidationResult } from '../types';
+import { Pick, Team, ValidationResult } from '../types';
 import { logger } from '../utils/logger';
 
 export class PickService implements IPickService {

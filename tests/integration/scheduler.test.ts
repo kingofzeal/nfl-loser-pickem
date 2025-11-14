@@ -132,6 +132,9 @@ describe('SchedulerService Integration Tests', () => {
   });
 
   beforeEach(() => {
+    // Reset all mocks/spies between tests to avoid cross-test leakage
+    // (e.g., a spy from a previous finalizeWeeksIfNeeded test forcing a true return)
+    jest.restoreAllMocks();
     // Clear data between tests
     sqliteDb.exec('DELETE FROM audit_log');
     sqliteDb.exec('DELETE FROM picks');

@@ -22,6 +22,18 @@ All project files have been updated to reflect your design decisions from `DECIS
 - ✅ Validates that picked team actually plays in that week
 - ✅ Prevents invalid picks (bye weeks, scheduling errors)
 
+### Adjusted: `migrations/0001_create_teams.sql`
+Schema simplified to only core identity fields (`slug`, `name`, `conference`, `division`). Legacy references to `city` and `abbreviation` were removed from tests/documentation to match the current normalized structure.
+
+### Embedded `updated_at` Strategy
+All mutable tables now include an `updated_at` column directly in their creation migrations (no later ALTER migrations). Application code manually sets `updated_at = datetime('now')` on UPDATE statements (Cloudflare D1 lacks trigger support).
+
+### Boolean Flag Coercion
+Workspace reminder flags (`reminder_friday_enabled`, `reminder_sunday_enabled`) are stored as INTEGER (1/0). The data layer explicitly coerces booleans to 1/0 at insert/update time.
+
+### Week Finalization Rule
+Empty weeks (0 games) are never treated as finalized; the `allFinalForWeek` helper returns false if game count is zero, preventing premature season rollover.
+
 ---
 
 ## 🔧 TypeScript Types
