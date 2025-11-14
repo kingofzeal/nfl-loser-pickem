@@ -32,10 +32,19 @@ ENVIRONMENT = "production"
 LOG_LEVEL = "info"
 
 # Secrets (set with: wrangler secret put SECRET_NAME)
-# DISCORD_TOKEN - Discord bot token
-# DISCORD_PUBLIC_KEY - Discord application public key
-# DISCORD_APPLICATION_ID - Discord application ID
-# ESPN_API_KEY - (optional) if ESPN requires authentication
+# 
+# DISCORD (if using Discord):
+#   DISCORD_TOKEN - Discord bot token
+#   DISCORD_PUBLIC_KEY - Discord application public key
+#   DISCORD_APPLICATION_ID - Discord application ID
+#
+# SLACK (if using Slack):
+#   SLACK_BOT_TOKEN - Slack Bot User OAuth Token (xoxb-...)
+#   SLACK_SIGNING_SECRET - Slack app signing secret
+#
+# OPTIONAL:
+#   ESPN_API_KEY - (optional) if ESPN requires authentication
+#   THESPORTSDB_API_KEY - (optional) if using TheSportsDB provider
 
 # Cron triggers for scheduled tasks
 [[triggers.crons]]

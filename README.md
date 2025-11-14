@@ -1,6 +1,10 @@
 # NFL Loser Pick'em Bot
 
-A workspace-scoped bot for running NFL "Loser Pick'em" leagues across Slack and Discord.
+A serverless bot for running NFL "Loser Pick'em" leagues on **Discord** and **Slack**.
+
+> 🎮 **Discord** - Rich embeds, slash commands, gaming communities  
+> 💬 **Slack** - Workspace integration, slash commands, work teams  
+> 🎯 **Both** - Deploy once, use everywhere
 
 ## Game Rules
 
@@ -17,12 +21,13 @@ A workspace-scoped bot for running NFL "Loser Pick'em" leagues across Slack and 
 
 ## Tech Stack
 
-- **Runtime**: Node.js 22 LTS
-- **Language**: TypeScript
-- **Database**: PostgreSQL (with migration support)
-- **Bot Platforms**: Slack & Discord (modular adapter pattern)
-- **Deployment**: Serverless (AWS Lambda / Vercel / similar)
+- **Runtime**: Cloudflare Workers (Edge compute)
+- **Language**: TypeScript 5.6
+- **Database**: Cloudflare D1 (SQLite at edge)
+- **Bot Platforms**: Discord & Slack (modular adapter pattern)
+- **Deployment**: Cloudflare Workers (serverless, $0 for typical usage)
 - **External Data**: ESPN API or TheSportsDB for game data
+- **Scheduling**: Cloudflare Cron Triggers
 
 ## Project Structure
 
@@ -43,50 +48,62 @@ config/              # Configuration files
 docs/                # Additional documentation
 ```
 
-## Getting Started
+## Quick Start
+
+### 30-Minute Deployment
+
+Get running in production fast:
+
+```powershell
+# Windows PowerShell - See DEPLOY_NOW.md for full guide
+npm install -g wrangler
+wrangler login
+wrangler d1 create nfl-loser-pickem-db
+# Update wrangler.toml with database_id
+wrangler d1 migrations apply nfl-loser-pickem-db --remote
+npm run build
+wrangler deploy
+```
+
+**Choose your platform:**
+- 🎮 **Discord:** See `DEPLOY_NOW.md` → Section 6A
+- 💬 **Slack:** See `DEPLOY_NOW.md` → Section 6B
+- 🎯 **Both:** Follow both sections
 
 ### Prerequisites
 
-- Node.js 22+ (LTS recommended)
-- PostgreSQL 14+
-- Slack or Discord bot token
+- Cloudflare account (free tier works)
+- **Discord:** Bot application from https://discord.com/developers/applications
+- **Slack:** App from https://api.slack.com/apps
+- Node.js 22+ for local development (optional)
 
-### Installation
+### Local Development
 
 ```bash
 npm install
-```
-
-**Note:** The `canvas` package is optional and requires native compilation (Python + build tools on Windows). If installation fails, the bot will function without image generation. See `docs/ROADMAP.md` for alternative image generation solutions being evaluated.
-
-### Environment Setup
-```
-
-### Database Setup
-
-```bash
-npm run migrate:up
+npm run build
+npm test
+wrangler dev  # Test locally
 ```
 
 ### Configuration
 
-Copy `.env.example` to `.env` and configure:
+Secrets managed via Wrangler CLI:
 
-```
-DATABASE_URL=postgresql://...
-SLACK_BOT_TOKEN=xoxb-...
-DISCORD_BOT_TOKEN=...
-ESPN_API_KEY=...
-TIMEZONE=America/New_York
-```
-
-### Development
-
+**Discord:**
 ```bash
-npm run dev
+wrangler secret put DISCORD_TOKEN
+wrangler secret put DISCORD_PUBLIC_KEY
+wrangler secret put DISCORD_APPLICATION_ID
 ```
 
-### Testing
+**Slack:**
+```bash
+wrangler secret put SLACK_BOT_TOKEN
+wrangler secret put SLACK_SIGNING_SECRET
+```
+
+See `wrangler.toml` for all configuration options.
 
 ```bash
 npm test
@@ -112,15 +129,29 @@ npm run test:integration
 
 ## Documentation
 
+- **[🚀 Quick Deployment Guide](./DEPLOY_NOW.md)** - Get running in 30 minutes
+- **[📋 Deployment Checklist](./docs/DEPLOYMENT_CHECKLIST.md)** - Step-by-step verification
+- **[🎯 Platform Comparison](./docs/PLATFORM_COMPARISON.md)** - Discord vs Slack guide
+- [Detailed Deployment Guide](./DEPLOYMENT_GUIDE.md)
 - [Technical Specification](./NFL%20Loser%20Pick%20'em%20Bot%20—%20Technical%20Speci.md)
 - [Architecture Overview](./docs/ARCHITECTURE.md)
 - [Database Schema](./docs/DATABASE.md)
 - [API Integration](./docs/DATA_SOURCES.md)
-- [Finalized Decisions](./docs/DECISIONS_FINALIZED.md)
+- [Project Roadmap](./docs/ROADMAP.md)
 
-## Key Design Decisions
+## Deployment Resources
 
-- **Slack First:** Slack integration prioritized over Discord
+- **Scripts:**
+  - `scripts/register-discord-commands.js` - Register Discord slash commands
+  - `scripts/setup-slack-workspace.js` - Configure Slack workspace
+  - `scripts/deploy.sh` - Automated deployment (Linux/Mac)
+- **Database:**
+  - `scripts/seed-teams.sql` - Load all 32 NFL teams
+  - `scripts/seed-season-2025.sql` - Pre-populate 2025 season structure
+
+## Key Features
+
+- **Multi-Platform:** Discord and Slack support with shared database
 - **Workspace-Wide Reminders:** No per-player reminder preferences
 - **Mid-Season Joins Allowed:** Players can join anytime with no penalties for missed weeks
 - **Export & Archive:** Season data exported to JSON/CSV and purged after completion

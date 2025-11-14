@@ -1,20 +1,28 @@
 # NFL Loser Pick'em Bot - Deployment Guide
 
+> **Quick Start?** See [SLACK_QUICKSTART.md](./SLACK_QUICKSTART.md) or [DEPLOY_NOW.md](./DEPLOY_NOW.md) for fast deployment.
+
 ## Overview
 
-This bot is now **fully implemented** and ready for deployment to Cloudflare Workers. All core functionality is complete including:
-- Discord command handling
+This bot is **fully implemented** and ready for deployment to Cloudflare Workers. All core functionality is complete including:
+- **Discord & Slack** command handling
 - ESPN API integration for live scores
 - Automated week management
 - Pick validation and tracking
 - Leaderboard generation
 - Scheduled cron jobs
 
+## Choose Your Platform
+
+- 💬 **Slack Only:** See [SLACK_QUICKSTART.md](./SLACK_QUICKSTART.md) - 15 minutes
+- 🎮 **Discord Only:** Follow this guide (Discord sections)
+- 🎯 **Both Platforms:** Follow all sections below
+
 ## Prerequisites
 
 - Node.js 22+ (for local development)
-- Cloudflare account
-- Discord Bot Application
+- Cloudflare account (free tier works)
+- **Discord:** Bot Application OR **Slack:** App with OAuth token
 - Wrangler CLI (`npm install -g wrangler`)
 
 ## Step 1: Cloudflare Setup
