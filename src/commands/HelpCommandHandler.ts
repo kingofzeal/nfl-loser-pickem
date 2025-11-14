@@ -12,10 +12,10 @@ export class HelpCommandHandler implements ICommandHandler {
     return true; // Everyone can view help
   }
 
-  async execute(_context: CommandContext, _args: string[]): Promise<CommandResponse> {
+  async execute(context: CommandContext, _args: string[]): Promise<CommandResponse> {
     return {
       type: 'ephemeral',
-      content: this.renderService.generateHelp()
+      content: this.renderService.generateHelp(context.is_admin)
     };
   }
 }

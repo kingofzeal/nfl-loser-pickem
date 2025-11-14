@@ -136,39 +136,46 @@ export class RenderService implements IRenderService {
   /**
    * Generate help message
    */
-  generateHelp(): EmbedMessage {
+  generateHelp(isAdmin: boolean = false): EmbedMessage {
+    const fields: { name: string; value: string }[] = [
+      {
+        name: '🎯 How to Play',
+        value: 'Pick one team each week that you think will **LOSE**. If your team loses, you win that week! But you can only use each team once per season.',
+      },
+      {
+        name: '📝 Commands',
+        value: '`/nfl pick <team>` - Make your pick for the current week\n' +
+               '`/nfl my` - View your picks and record\n' +
+               '`/nfl board` - View the leaderboard\n' +
+               '`/nfl help` - Show this help message',
+      },
+    ];
+
+    // Only show admin commands to admins
+    if (isAdmin) {
+      fields.push({
+        name: '⚙️ Admin Commands',
+        value: '`/nfl admin open-week <week>` - Open a week for picks\n' +
+               '`/nfl admin finalize-week <week>` - Finalize a week after games\n' +
+               '`/nfl admin sync` - Sync current week from ESPN\n' +
+               '`/nfl admin sync <week>` - Sync specific week from ESPN\n' +
+               '`/nfl admin sync <start>-<end>` - Sync week range (e.g., 1-11)\n' +
+               '`/nfl admin sync all` - Sync all active weeks from ESPN',
+      });
+    }
+
+    fields.push({
+      name: '📏 Rules',
+      value: '• Each team can only be used once per season\n' +
+             '• Picks lock when the team\'s game starts\n' +
+             '• Ties count as losses for the player\n' +
+             '• If you don\'t pick, a team will be auto-assigned',
+    });
+
     return {
       title: '🏈 NFL Loser Pick\'em Bot Help',
       description: 'Welcome to the NFL Loser Pick\'em league! Here\'s how to play:',
-      fields: [
-        {
-          name: '🎯 How to Play',
-          value: 'Pick one team each week that you think will **LOSE**. If your team loses, you win that week! But you can only use each team once per season.',
-        },
-        {
-          name: '📝 Commands',
-          value: '`/nfl pick <team>` - Make your pick for the current week\n' +
-                 '`/nfl my` - View your picks and record\n' +
-                 '`/nfl board` - View the leaderboard\n' +
-                 '`/nfl help` - Show this help message',
-        },
-        {
-          name: '⚙️ Admin Commands',
-          value: '`/nfl admin open-week <week>` - Open a week for picks\n' +
-                 '`/nfl admin finalize-week <week>` - Finalize a week after games\n' +
-                 '`/nfl admin sync` - Sync current week from ESPN\n' +
-                 '`/nfl admin sync <week>` - Sync specific week from ESPN\n' +
-                 '`/nfl admin sync <start>-<end>` - Sync week range (e.g., 1-11)\n' +
-                 '`/nfl admin sync all` - Sync all active weeks from ESPN',
-        },
-        {
-          name: '📏 Rules',
-          value: '• Each team can only be used once per season\n' +
-                 '• Picks lock when the team\'s game starts\n' +
-                 '• Ties count as losses for the player\n' +
-                 '• If you don\'t pick, a team will be auto-assigned',
-        },
-      ],
+      fields,
       footer: 'Good luck with your picks! 🎲',
       color: '#0099ff', // Blue
     };

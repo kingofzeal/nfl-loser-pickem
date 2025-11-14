@@ -28,7 +28,7 @@ export interface IRenderService {
   /**
    * Generate help message
    */
-  generateHelp(): EmbedMessage;
+  generateHelp(isAdmin?: boolean): EmbedMessage;
 
   /**
    * Generate week open announcement
