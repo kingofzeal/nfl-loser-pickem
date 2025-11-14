@@ -98,7 +98,7 @@ async function main() {
   }
 
   // Create SQL command
-  const sql = `INSERT INTO workspaces (workspace_name, platform, platform_workspace_id, webhook_url) VALUES ('${workspaceName}', 'slack', '${teamId}', '${webhookUrl}')`;
+  const sql = `INSERT INTO workspaces (name, platform, platform_workspace_id) VALUES ('${workspaceName}', 'slack', '${teamId}')`;
 
   console.log('\n🚀 Creating workspace entry...');
 

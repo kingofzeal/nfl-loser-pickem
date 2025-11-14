@@ -59,7 +59,10 @@ database_name = "nfl-loser-pickem-db"
 database_id = "YOUR_DATABASE_ID_HERE"  # ← Paste here
 ```
 
-Also add your `account_id` at the top of `wrangler.toml` (find in Cloudflare dashboard).
+Also uncomment and add your `account_id` at the top of `wrangler.toml`:
+```toml
+account_id = "your-account-id-here"  # ← Find in Cloudflare dashboard
+```
 
 **Run migrations:**
 ```powershell

@@ -152,7 +152,7 @@ wrangler secret put SLACK_SIGNING_SECRET
 
 ## Deploy Worker
 
-- [ ] Update `account_id` in `wrangler.toml`
+- [ ] Uncomment and update `account_id` in `wrangler.toml`
 - [ ] Run: `npm run build`
 - [ ] Run: `wrangler deploy`
 - [ ] Note the deployed Worker URL
@@ -189,7 +189,7 @@ wrangler secret put SLACK_SIGNING_SECRET
 - [ ] Get your Slack Team ID (from app settings or API)
 - [ ] Run: 
 ```bash
-wrangler d1 execute nfl-loser-pickem-db --remote --command="INSERT INTO workspaces (workspace_name, platform, platform_workspace_id, webhook_url) VALUES ('My League', 'slack', 'YOUR_TEAM_ID', 'https://YOUR-WORKER.workers.dev/slack/commands')"
+wrangler d1 execute nfl-loser-pickem-db --remote --command="INSERT INTO workspaces (name, platform, platform_workspace_id) VALUES ('My League', 'slack', 'YOUR_TEAM_ID')"
 ```
 - [ ] Verify: `wrangler d1 execute nfl-loser-pickem-db --remote --command="SELECT * FROM workspaces"`
 

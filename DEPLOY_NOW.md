@@ -56,7 +56,10 @@ database_name = "nfl-loser-pickem-db"
 database_id = "PASTE_YOUR_ID_HERE"
 ```
 
-Also add your Cloudflare `account_id` to `wrangler.toml` (find it in your Cloudflare dashboard).
+Also uncomment and add your Cloudflare `account_id` to `wrangler.toml` (find it in your Cloudflare dashboard):
+```toml
+account_id = "your-account-id-here"
+```
 
 #### 4. Run Migrations
 ```powershell
@@ -190,7 +193,7 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_APP_ID&permissions=21476
 
 **Create Workspace in Database:**
 ```powershell
-wrangler d1 execute nfl-loser-pickem-db --remote --command="INSERT INTO workspaces (workspace_name, platform, platform_workspace_id, webhook_url) VALUES ('My League', 'slack', 'YOUR_SLACK_TEAM_ID', 'https://YOUR-WORKER.workers.dev/slack/commands')"
+wrangler d1 execute nfl-loser-pickem-db --remote --command="INSERT INTO workspaces (name, platform, platform_workspace_id) VALUES ('My League', 'slack', 'YOUR_SLACK_TEAM_ID')"
 ```
 
 Find your Slack Team ID:

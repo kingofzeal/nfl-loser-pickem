@@ -1,7 +1,7 @@
 name = "nfl-loser-pickem"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
-node_compat = true
+compatibility_flags = ["nodejs_compat"]
 
 # Workers configuration
 workers_dev = true
@@ -15,16 +15,18 @@ database_id = "" # Will be created with: wrangler d1 create nfl-loser-pickem-db
 migrations_dir = "migrations"
 
 # KV namespace for caching (optional - for ESPN API responses, etc.)
-[[kv_namespaces]]
-binding = "CACHE"
-id = "" # Will be created with: wrangler kv:namespace create CACHE
-preview_id = "" # For preview deployments
+# Uncomment and add IDs after creating with: wrangler kv:namespace create CACHE
+# [[kv_namespaces]]
+# binding = "CACHE"
+# id = "your-kv-namespace-id"
+# preview_id = "your-preview-kv-namespace-id"
 
 # R2 bucket for backups (optional - for season/standings backups)
-[[r2_buckets]]
-binding = "BACKUPS"
-bucket_name = "nfl-loser-pickem-backups"
-preview_bucket_name = "nfl-loser-pickem-backups-preview"
+# Uncomment after creating with: wrangler r2 bucket create nfl-loser-pickem-backups
+# [[r2_buckets]]
+# binding = "BACKUPS"
+# bucket_name = "nfl-loser-pickem-backups"
+# preview_bucket_name = "nfl-loser-pickem-backups-preview"
 
 # Environment variables
 [vars]
@@ -47,21 +49,18 @@ LOG_LEVEL = "info"
 #   THESPORTSDB_API_KEY - (optional) if using TheSportsDB provider
 
 # Cron triggers for scheduled tasks
-[[triggers.crons]]
-# Every hour during NFL season (for game score updates)
-cron = "0 * * * *"
+# Note: Cloudflare Workers has specific cron syntax requirements
+# Be careful with wildcard usage - not all combinations are supported
 
-[[triggers.crons]]
-# Every 15 minutes on Sunday (for live game tracking)
-cron = "*/15 * * * SUN"
-
-[[triggers.crons]]
-# Every 15 minutes on Monday evening (for MNF tracking)
-cron = "*/15 18-23 * * MON"
-
-[[triggers.crons]]
-# Every 15 minutes on Thursday evening (for TNF tracking)
-cron = "*/15 18-23 * * THU"
+[triggers]
+crons = [
+  "0 * * * *"          # Every hour (game score updates)
+  # Note: More frequent polling disabled for now due to Cloudflare cron limitations
+  # Enable these after deployment if needed via dashboard
+  # "0,15,30,45 * * * 0",      # Every 15 min on Sunday
+  # "0,15,30,45 18-23 * * 1",  # Every 15 min Mon evening
+  # "0,15,30,45 18-23 * * 4"   # Every 15 min Thu evening
+]
 
 # Development environment overrides
 [env.dev]
@@ -73,20 +72,18 @@ binding = "DB"
 database_name = "nfl-loser-pickem-db-dev"
 database_id = "" # Separate dev database
 
-[[env.dev.kv_namespaces]]
-binding = "CACHE"
-id = "" # Dev KV namespace
-
-[[env.dev.r2_buckets]]
-binding = "BACKUPS"
-bucket_name = "nfl-loser-pickem-backups-dev"
+# Uncomment KV/R2 if using in dev
+# [[env.dev.kv_namespaces]]
+# binding = "CACHE"
+# id = "" # Dev KV namespace
+#
+# [[env.dev.r2_buckets]]
+# binding = "BACKUPS"
+# bucket_name = "nfl-loser-pickem-backups-dev"
 
 # Build configuration
 [build]
 command = "npm run build"
-
-[build.upload]
-format = "service-worker"
 
 # Observability
 [observability]

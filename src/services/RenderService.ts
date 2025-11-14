@@ -7,13 +7,17 @@
  * Features:
  * - Cloudflare Workers compatible (no native bindings)
  * - JSX/React-style template rendering
- * - SVG output with PNG conversion via @resvg/resvg-js
+ * - SVG output (PNG conversion disabled for Workers compatibility)
  * - Lightweight and fast
  * - Dynamic image sizing based on data
+ * 
+ * Note: PNG conversion via @resvg/resvg-js is commented out as it requires native bindings
+ * that don't work in Cloudflare Workers. SVG output is fully functional.
  */
 
 import satori, { SatoriOptions } from 'satori';
-import { Resvg } from '@resvg/resvg-js';
+// PNG conversion disabled for Cloudflare Workers (native bindings not supported)
+// import { Resvg } from '@resvg/resvg-js';
 import { IRenderService } from './interfaces/IRenderService';
 import { 
   EmbedMessage, 
@@ -150,9 +154,11 @@ export class RenderService implements IRenderService {
         },
         {
           name: '⚙️ Admin Commands',
-          value: '`/nfl admin open-week` - Open a week for picks\n' +
-                 '`/nfl admin finalize-week` - Finalize a week after games\n' +
-                 '`/nfl admin sync-games` - Sync game data from ESPN',
+          value: '`/nfl admin open-week <week>` - Open a week for picks\n' +
+                 '`/nfl admin finalize-week <week>` - Finalize a week after games\n' +
+                 '`/nfl admin sync` - Sync current week from ESPN\n' +
+                 '`/nfl admin sync <week>` - Sync specific week from ESPN\n' +
+                 '`/nfl admin sync all` - Sync all weeks from ESPN',
         },
         {
           name: '📏 Rules',
@@ -226,7 +232,24 @@ export class RenderService implements IRenderService {
       // Generate SVG
       const svg = await satori(jsx, options);
 
-      // Convert SVG to PNG using resvg
+      // PNG conversion disabled for Cloudflare Workers (native bindings not supported)
+      // Return SVG as buffer for now - in the future, this could use a Workers-compatible
+      // image conversion service or Cloudflare Images API
+      
+      // TODO Phase 11: Implement Workers-compatible PNG conversion
+      // Options: Cloudflare Images API, external service, or client-side conversion
+      
+      const svgBuffer = Buffer.from(svg, 'utf-8');
+
+      logger.info('Successfully generated weekly summary image (SVG)', { 
+        seasonYear, 
+        weekNumber,
+        sizeBytes: svgBuffer.length 
+      });
+
+      return svgBuffer;
+
+      /* Original PNG conversion code (requires native bindings):
       const resvg = new Resvg(svg, {
         fitTo: {
           mode: 'width',
@@ -244,6 +267,7 @@ export class RenderService implements IRenderService {
       });
 
       return pngBuffer;
+      */
     } catch (error) {
       logger.error('Failed to generate weekly summary image', { error, seasonYear, weekNumber });
       throw new Error(`Failed to generate weekly summary image: ${error}`);

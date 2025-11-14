@@ -122,6 +122,11 @@ export default {
         return handleSlackEvent(request, env, ctx);
       }
       
+      // Slack slash commands (if using Slack)
+      if (url.pathname === '/slack/commands' && request.method === 'POST') {
+        return handleSlackCommand(request, env, ctx);
+      }
+      
       // Default 404
       return new Response('Not Found', { status: 404 });
     } catch (error) {
@@ -411,6 +416,221 @@ async function sendDiscordFollowup(interaction: any, env: Env, content: any): Pr
       embeds: [content],
     }),
   });
+}
+
+/**
+ * Convert Discord-style markdown to Slack mrkdwn format
+ */
+function convertToSlackMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '*$1*')  // Discord bold (**text**) to Slack bold (*text*)
+    .replace(/`([^`]+)`/g, '`$1`');      // Keep backticks as-is
+}
+
+/**
+ * Handle Slack slash command
+ */
+async function handleSlackCommand(
+  request: Request,
+  env: Env,
+  _ctx: ExecutionContext
+): Promise<Response> {
+  try {
+    // Verify Slack signature
+    const signature = request.headers.get('X-Slack-Signature');
+    const timestamp = request.headers.get('X-Slack-Request-Timestamp');
+    
+    if (!signature || !timestamp) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+    
+    // Parse the form data from Slack
+    const formData = await request.formData();
+    const command = formData.get('command') as string;
+    const text = formData.get('text') as string || '';
+    const userId = formData.get('user_id') as string;
+    const teamId = formData.get('team_id') as string;
+    const userName = formData.get('user_name') as string;
+    
+    logger.info('Slack command received', { command, text, userId, teamId });
+    
+    // Initialize database and services
+    const database = new Database(getD1Database(env));
+    const services = createServices(database, env);
+    const handlers = createCommandHandlers(services);
+    
+    // Find workspace by Slack team ID
+    const workspace = await database.workspaces.findByPlatformId('slack', teamId);
+    if (!workspace) {
+      return new Response(JSON.stringify({
+        response_type: 'ephemeral',
+        text: '❌ Workspace not registered. Please contact an admin to set up this workspace.'
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    
+    // Find or create player
+    let player = await database.players.findByWorkspaceAndPlatformUserId(workspace.workspace_id, userId);
+    if (!player) {
+      player = await database.players.create({
+        workspace_id: workspace.workspace_id,
+        platform_user_id: userId,
+        display_name: userName,
+        is_admin: false,
+        joined_week_id: null,
+      });
+      logger.info('New Slack player created', { player_id: player.player_id, display_name: userName });
+    }
+    
+    // Parse command and args
+    const args = text.trim().split(/\s+/).filter(arg => arg.length > 0);
+    const subcommand = args[0]?.toLowerCase() || 'help';
+    const commandArgs = args.slice(1);
+    
+    // Create command context
+    const context: CommandContext = {
+      workspace_id: workspace.workspace_id,
+      player_id: player.player_id,
+      platform: 'slack',
+      channel_id: formData.get('channel_id') as string,
+      is_admin: !!player.is_admin,
+    };
+    
+    // Route to appropriate handler
+    let handler;
+    switch (subcommand) {
+      case 'pick':
+        handler = handlers.pick;
+        break;
+      case 'my':
+        handler = handlers.my;
+        break;
+      case 'board':
+      case 'standings':
+        handler = handlers.board;
+        break;
+      case 'admin':
+        handler = handlers.admin;
+        break;
+      case 'help':
+      default:
+        handler = handlers.help;
+        break;
+    }
+    
+    // Check if this is a long-running admin sync command
+    const isLongRunningCommand = subcommand === 'admin' && commandArgs[0]?.toLowerCase() === 'sync';
+    
+    if (isLongRunningCommand) {
+      // Respond immediately and process in background
+      const responseUrl = formData.get('response_url') as string;
+      
+      // Send immediate acknowledgment
+      const immediateResponse = new Response(JSON.stringify({
+        response_type: 'ephemeral',
+        text: '⏳ Syncing games from ESPN... This may take a moment.'
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      // Process command in background using waitUntil
+      _ctx.waitUntil(
+        (async () => {
+          try {
+            const result = await handler.execute(context, commandArgs);
+            
+            // Format response
+            let responseText = '';
+            if (typeof result.content === 'string') {
+              responseText = convertToSlackMarkdown(result.content);
+            } else if ('title' in result.content) {
+              responseText = `*${result.content.title}*\n`;
+              if (result.content.description) {
+                responseText += `${convertToSlackMarkdown(result.content.description)}\n`;
+              }
+              if (result.content.fields) {
+                for (const field of result.content.fields) {
+                  responseText += `\n*${field.name}:*\n${convertToSlackMarkdown(field.value)}\n`;
+                }
+              }
+              if (result.content.footer) {
+                responseText += `\n_${convertToSlackMarkdown(result.content.footer)}_`;
+              }
+            }
+            
+            // Send follow-up message to response_url
+            if (responseUrl) {
+              await fetch(responseUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  response_type: result.type === 'public' ? 'in_channel' : 'ephemeral',
+                  text: responseText,
+                  replace_original: true,
+                }),
+              });
+            }
+          } catch (error) {
+            logger.error('Background command execution error', { error });
+            if (responseUrl) {
+              await fetch(responseUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  response_type: 'ephemeral',
+                  text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                  replace_original: true,
+                }),
+              });
+            }
+          }
+        })()
+      );
+      
+      return immediateResponse;
+    }
+    
+    // Execute command synchronously for fast commands
+    const result = await handler.execute(context, commandArgs);
+    
+    // Format response for Slack
+    let responseText = '';
+    if (typeof result.content === 'string') {
+      responseText = convertToSlackMarkdown(result.content);
+    } else if ('title' in result.content) {
+      // EmbedMessage - convert to Slack format
+      responseText = `*${result.content.title}*\n`;
+      if (result.content.description) {
+        responseText += `${convertToSlackMarkdown(result.content.description)}\n`;
+      }
+      if (result.content.fields) {
+        for (const field of result.content.fields) {
+          responseText += `\n*${field.name}:*\n${convertToSlackMarkdown(field.value)}\n`;
+        }
+      }
+      if (result.content.footer) {
+        responseText += `\n_${convertToSlackMarkdown(result.content.footer)}_`;
+      }
+    }
+    
+    return new Response(JSON.stringify({
+      response_type: result.type === 'public' ? 'in_channel' : 'ephemeral',
+      text: responseText,
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    
+  } catch (error) {
+    logger.error('Slack command error', { error });
+    return new Response(JSON.stringify({
+      response_type: 'ephemeral',
+      text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }), {
+      status: 200, // Slack requires 200 even for errors
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 }
 
 /**
