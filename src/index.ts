@@ -127,6 +127,11 @@ export default {
         return handleSlackCommand(request, env, ctx);
       }
       
+      // Slack interactivity (modals, buttons, etc.)
+      if (url.pathname === '/slack/interactivity' && request.method === 'POST') {
+        return handleSlackInteractivity(request, env, ctx);
+      }
+      
       // Default 404
       return new Response('Not Found', { status: 404 });
     } catch (error) {
@@ -428,6 +433,205 @@ function convertToSlackMarkdown(text: string): string {
 }
 
 /**
+ * Handle Slack pick modal - show dropdown of eligible teams
+ */
+async function handleSlackPickModal(
+  triggerId: string,
+  context: CommandContext,
+  database: Database,
+  env: Env
+): Promise<Response> {
+  try {
+    // Get current season and week
+    const currentYear = new Date().getFullYear();
+    const season = await database.seasons.findByYear(currentYear);
+    
+    if (!season || season.state !== 'active') {
+      return new Response(JSON.stringify({
+        response_type: 'ephemeral',
+        text: '❌ No active season found.'
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const weeks = await database.weeks.findBySeason(season.season_id);
+    const currentWeek = weeks.find(w => w.state === 'open' || w.state === 'in_progress');
+
+    if (!currentWeek) {
+      return new Response(JSON.stringify({
+        response_type: 'ephemeral',
+        text: '❌ No open week found for picks.'
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Get games and eligible teams
+    const games = await database.games.findByWeek(currentWeek.week_id);
+    const teamsPlayingThisWeek = new Set<number>();
+    
+    for (const game of games) {
+      teamsPlayingThisWeek.add(game.home_team_id);
+      teamsPlayingThisWeek.add(game.away_team_id);
+    }
+
+    if (teamsPlayingThisWeek.size === 0) {
+      return new Response(JSON.stringify({
+        response_type: 'ephemeral',
+        text: `❌ No games found for Week ${currentWeek.week_number}. Please sync game data first.`
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Check for existing pick this week
+    const existingPick = await database.picks.findByWeekAndPlayer(currentWeek.week_id, context.player_id);
+    
+    // Get player's used teams (excluding current week if changing pick)
+    const allPicks = await database.picks.findByPlayer(context.player_id);
+    const usedTeamIds = new Set(
+      allPicks
+        .filter(p => p.week_id !== currentWeek.week_id)  // Exclude current week
+        .map(p => p.team_id)
+    );
+
+    // Get eligible teams
+    const allTeams = await database.teams.findAll();
+    const eligibleTeams = allTeams
+      .filter(t => teamsPlayingThisWeek.has(t.team_id) && !usedTeamIds.has(t.team_id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    if (eligibleTeams.length === 0) {
+      return new Response(JSON.stringify({
+        response_type: 'ephemeral',
+        text: `❌ No eligible teams available for Week ${currentWeek.week_number}.`
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    
+    // Find the existing pick's team if there is one
+    let initialOption = undefined;
+    if (existingPick) {
+      const existingTeam = allTeams.find(t => t.team_id === existingPick.team_id);
+      if (existingTeam) {
+        initialOption = {
+          text: {
+            type: 'plain_text',
+            text: `${existingTeam.name} (${existingTeam.slug})`
+          },
+          value: existingTeam.slug
+        };
+      }
+    }
+
+    // Build Slack modal with dropdown
+    const modalTitle = existingPick ? `Change Week ${currentWeek.week_number} Pick` : `Week ${currentWeek.week_number} Pick`;
+    const modalText = existingPick 
+      ? `*Change your team to LOSE for Week ${currentWeek.week_number}:*\n\nYou currently have a pick. Select a different team to change it.\n\nRemember: You can only use each team once per season!`
+      : `*Choose your team to LOSE for Week ${currentWeek.week_number}:*\n\nRemember: You can only use each team once per season!`;
+    
+    const selectElement: any = {
+      type: 'static_select',
+      action_id: 'team_selection',
+      placeholder: {
+        type: 'plain_text',
+        text: 'Choose a team...'
+      },
+      options: eligibleTeams.map(team => ({
+        text: {
+          type: 'plain_text',
+          text: `${team.name} (${team.slug})`
+        },
+        value: team.slug
+      }))
+    };
+    
+    // Pre-select existing pick if available
+    if (initialOption) {
+      selectElement.initial_option = initialOption;
+    }
+    
+    const modal = {
+      type: 'modal',
+      callback_id: 'pick_team_modal',
+      title: {
+        type: 'plain_text',
+        text: modalTitle
+      },
+      submit: {
+        type: 'plain_text',
+        text: existingPick ? 'Change Pick' : 'Submit Pick'
+      },
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: modalText
+          }
+        },
+        {
+          type: 'input',
+          block_id: 'team_select',
+          label: {
+            type: 'plain_text',
+            text: 'Select Team'
+          },
+          element: selectElement
+        }
+      ],
+      private_metadata: JSON.stringify({
+        workspace_id: context.workspace_id,
+        player_id: context.player_id,
+        week_id: currentWeek.week_id,
+        week_number: currentWeek.week_number
+      })
+    };
+
+    // Open modal using Slack API
+    const slackToken = env.SLACK_BOT_TOKEN;
+    const modalResponse = await fetch('https://slack.com/api/views.open', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${slackToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        trigger_id: triggerId,
+        view: modal
+      })
+    });
+
+    const modalResult = await modalResponse.json() as any;
+    
+    if (!modalResult.ok) {
+      logger.error('Failed to open Slack modal', { error: modalResult.error });
+      return new Response(JSON.stringify({
+        response_type: 'ephemeral',
+        text: `❌ Failed to open pick dialog: ${modalResult.error}`
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Return empty 200 response (modal was opened)
+    return new Response('', { status: 200 });
+    
+  } catch (error) {
+    logger.error('Slack pick modal error', { error });
+    return new Response(JSON.stringify({
+      response_type: 'ephemeral',
+      text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+/**
  * Handle Slack slash command
  */
 async function handleSlackCommand(
@@ -496,6 +700,12 @@ async function handleSlackCommand(
       channel_id: formData.get('channel_id') as string,
       is_admin: !!player.is_admin,
     };
+
+    // Special handling for /nfl pick without args in Slack - show modal with dropdown
+    if (subcommand === 'pick' && commandArgs.length === 0) {
+      const triggerId = formData.get('trigger_id') as string;
+      return await handleSlackPickModal(triggerId, context, database, env);
+    }
     
     // Route to appropriate handler
     let handler;
@@ -627,6 +837,156 @@ async function handleSlackCommand(
       response_type: 'ephemeral',
       text: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`
     }), {
+      status: 200, // Slack requires 200 even for errors
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+/**
+ * Handle Slack interactivity (modal submissions, button clicks, etc.)
+ */
+async function handleSlackInteractivity(
+  request: Request,
+  env: Env,
+  _ctx: ExecutionContext
+): Promise<Response> {
+  try {
+    const formData = await request.formData();
+    const payloadStr = formData.get('payload') as string;
+    
+    if (!payloadStr) {
+      logger.error('No payload in Slack interactivity request');
+      return new Response('Bad Request', { status: 400 });
+    }
+    
+    const payload = JSON.parse(payloadStr);
+    
+    logger.info('Slack interactivity received', { type: payload.type, callback_id: payload.view?.callback_id });
+    
+    // Handle modal submission
+    if (payload.type === 'view_submission' && payload.view.callback_id === 'pick_team_modal') {
+      try {
+        const metadata = JSON.parse(payload.view.private_metadata);
+        const selectedOption = payload.view.state.values.team_select?.team_selection?.selected_option;
+        
+        if (!selectedOption) {
+          logger.error('No team selected in modal');
+          return new Response(JSON.stringify({
+            response_action: 'errors',
+            errors: {
+              team_select: 'Please select a team'
+            }
+          }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        
+        const teamSlug = selectedOption.value;
+        
+        logger.info('Processing pick modal submission', { teamSlug, metadata });
+        
+        // Initialize database and services
+        const database = new Database(getD1Database(env));
+        const services = createServices(database, env);
+        
+        // Find team
+        const team = await database.teams.findBySlug(teamSlug);
+        if (!team) {
+          logger.error('Team not found', { teamSlug });
+          return new Response(JSON.stringify({
+            response_action: 'errors',
+            errors: {
+              team_select: 'Invalid team selection'
+            }
+          }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        
+        // Check if player already has a pick this week
+        const existingPick = await services.pickService.getPlayerPickForWeek(
+          metadata.player_id,
+          metadata.week_id
+        );
+        
+        let pick;
+        if (existingPick) {
+          // Change pick
+          logger.info('Changing existing pick', { pickId: existingPick.pick_id, newTeam: team.team_id });
+          pick = await services.pickService.changePick(existingPick.pick_id, team.team_id);
+        } else {
+          // Create new pick
+          logger.info('Creating new pick', { playerId: metadata.player_id, weekId: metadata.week_id, team: team.team_id });
+          pick = await services.pickService.createPick(
+            metadata.player_id,
+            metadata.week_id,
+            team.team_id,
+            'manual'
+          );
+        }
+        
+        logger.info('Pick saved successfully', { pickId: pick.pick_id });
+        
+        // Send confirmation message to user
+        const userId = payload.user.id;
+        const confirmationMessage = existingPick 
+          ? `✅ Pick changed! You're now picking *${team.name}* to LOSE in Week ${metadata.week_number}.`
+          : `✅ Pick confirmed! You've picked *${team.name}* to LOSE in Week ${metadata.week_number}.`;
+        
+        // Send DM to user with confirmation (in background)
+        _ctx.waitUntil(
+          (async () => {
+            try {
+              const response = await fetch('https://slack.com/api/chat.postMessage', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${env.SLACK_BOT_TOKEN}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  channel: userId,
+                  text: confirmationMessage
+                })
+              });
+              const result = await response.json() as any;
+              if (!result.ok) {
+                logger.error('Failed to send pick confirmation', { error: result.error });
+              }
+            } catch (error) {
+              logger.error('Failed to send pick confirmation', { error });
+            }
+          })()
+        );
+        
+        // Success - close modal without confirmation dialog
+        return new Response('', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+        
+      } catch (error) {
+        logger.error('Error processing pick modal', { error, errorMessage: error instanceof Error ? error.message : 'Unknown' });
+        // Show error in modal
+        return new Response(JSON.stringify({
+          response_action: 'errors',
+          errors: {
+            team_select: error instanceof Error ? error.message : 'Failed to save pick'
+          }
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+    
+    // Default response for other interaction types
+    logger.info('Unhandled Slack interaction type', { type: payload.type });
+    return new Response('', { status: 200 });
+    
+  } catch (error) {
+    logger.error('Slack interactivity error', { error, errorMessage: error instanceof Error ? error.message : 'Unknown' });
+    return new Response(JSON.stringify({ error: 'Internal Server Error' }), { 
       status: 200, // Slack requires 200 even for errors
       headers: { 'Content-Type': 'application/json' },
     });

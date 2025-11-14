@@ -31,10 +31,11 @@ export class PickService implements IPickService {
   async validatePick(
     playerId: number,
     weekId: number,
-    teamId: number
+    teamId: number,
+    excludePickId?: number
   ): Promise<ValidationResult> {
     try {
-      logger.debug('Validating pick', { playerId, weekId, teamId });
+      logger.debug('Validating pick', { playerId, weekId, teamId, excludePickId });
 
       // Get week details
       const week = await this.db.weeks.findById(weekId);
@@ -47,9 +48,9 @@ export class PickService implements IPickService {
         return { valid: false, error: 'Week is not open for picks' };
       }
 
-      // Check if player already has a pick for this week
+      // Check if player already has a pick for this week (excluding the pick being changed)
       const existingPick = await this.getPlayerPickForWeek(playerId, weekId);
-      if (existingPick) {
+      if (existingPick && existingPick.pick_id !== excludePickId) {
         return { valid: false, error: 'You already have a pick for this week' };
       }
 
@@ -59,7 +60,7 @@ export class PickService implements IPickService {
         return { valid: false, error: 'Player not found' };
       }
 
-      const usedTeams = await this.getUsedTeamsByPlayer(playerId, week.season_id);
+      const usedTeams = await this.getUsedTeamsByPlayer(playerId, week.season_id, excludePickId);
       if (usedTeams.some(t => t.team_id === teamId)) {
         return { valid: false, error: 'You have already used this team this season' };
       }
@@ -95,7 +96,7 @@ export class PickService implements IPickService {
   /**
    * Get teams already used by a player in a season
    */
-  private async getUsedTeamsByPlayer(playerId: number, seasonId: number): Promise<Team[]> {
+  private async getUsedTeamsByPlayer(playerId: number, seasonId: number, excludePickId?: number): Promise<Team[]> {
     // Get all weeks in season
     const weeks = await this.db.weeks.findBySeason(seasonId);
     const weekIds = weeks.map(w => w.week_id);
@@ -104,7 +105,7 @@ export class PickService implements IPickService {
     const allPicks: Pick[] = [];
     for (const weekId of weekIds) {
       const pick = await this.getPlayerPickForWeek(playerId, weekId);
-      if (pick) {
+      if (pick && pick.pick_id !== excludePickId) {
         allPicks.push(pick);
       }
     }
@@ -201,11 +202,12 @@ export class PickService implements IPickService {
         throw new Error('Pick is locked and cannot be changed');
       }
 
-      // Validate new team selection
+      // Validate new team selection (exclude current pick from validation)
       const validation = await this.validatePick(
         existingPick.player_id,
         existingPick.week_id,
-        newTeamId
+        newTeamId,
+        pickId
       );
       if (!validation.valid) {
         throw new Error(validation.error);

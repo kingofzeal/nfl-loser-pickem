@@ -22,6 +22,8 @@ export interface Env {
   DISCORD_TOKEN: string;
   DISCORD_PUBLIC_KEY: string;
   DISCORD_APPLICATION_ID: string;
+  SLACK_BOT_TOKEN?: string;
+  SLACK_SIGNING_SECRET?: string;
   ESPN_API_KEY?: string;
   DATA_SOURCE?: string;
   THESPORTSDB_API_KEY?: string;
