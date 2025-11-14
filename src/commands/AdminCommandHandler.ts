@@ -210,13 +210,51 @@ export class AdminCommandHandler implements ICommandHandler {
       };
     }
 
+    // Sync all weeks if "all" is specified
+    if (args.length > 0 && args[0].toLowerCase() === 'all') {
+      const weeks = await this.db.weeks.findBySeason(season.season_id);
+      
+      if (weeks.length === 0) {
+        return {
+          type: 'ephemeral',
+          content: this.renderService.generateError('No weeks found for current season.')
+        };
+      }
+
+      let successCount = 0;
+      let errorCount = 0;
+      const errors: string[] = [];
+
+      for (const week of weeks) {
+        try {
+          await this.gameService.syncGames(week.week_id);
+          successCount++;
+        } catch (error) {
+          errorCount++;
+          errors.push(`Week ${week.week_number}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      }
+
+      const resultText = errorCount > 0
+        ? `Synced ${successCount} of ${weeks.length} weeks.\n\n*Errors:*\n${errors.join('\n')}`
+        : `Successfully synced all ${successCount} weeks.`;
+
+      return {
+        type: 'ephemeral',
+        content: { 
+          title: errorCount > 0 ? '⚠️ Sync Completed with Errors' : '✅ Sync Complete',
+          description: resultText
+        }
+      };
+    }
+
     // If week number provided, sync that week only
     if (args.length > 0) {
       const weekNumber = parseInt(args[0]);
       if (isNaN(weekNumber)) {
         return {
           type: 'ephemeral',
-          content: this.renderService.generateError('Invalid week number.')
+          content: this.renderService.generateError('Invalid week number. Use a number or "all".')
         };
       }
 
