@@ -15,3 +15,6 @@ coverage/
 public/images/*
 !public/images/.gitkeep
 .cache/
+
+# Wrangler config with account-specific IDs
+wrangler.toml

@@ -5,13 +5,13 @@ compatibility_flags = ["nodejs_compat"]
 
 # Workers configuration
 workers_dev = true
-account_id = "" # Add your Cloudflare account ID here
+# account_id = "YOUR_ACCOUNT_ID_HERE" # Optional - wrangler will use your default account
 
 # D1 Database binding
 [[d1_databases]]
 binding = "DB"
 database_name = "nfl-loser-pickem-db"
-database_id = "" # Will be created with: wrangler d1 create nfl-loser-pickem-db
+database_id = "YOUR_DATABASE_ID_HERE" # Replace with your D1 database ID
 migrations_dir = "migrations"
 
 # KV namespace for caching (optional - for ESPN API responses, etc.)

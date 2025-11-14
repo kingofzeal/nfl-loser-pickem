@@ -58,8 +58,14 @@ Get running in production fast:
 # Windows PowerShell - See DEPLOY_NOW.md for full guide
 npm install -g wrangler
 wrangler login
+
+# Create your local wrangler.toml from template
+cp wrangler.template.toml wrangler.toml
+
+# Create database and update wrangler.toml with the database_id
 wrangler d1 create nfl-loser-pickem-db
-# Update wrangler.toml with database_id
+# Copy the database_id from output and paste into wrangler.toml
+
 wrangler d1 migrations apply nfl-loser-pickem-db --remote
 npm run build
 wrangler deploy

@@ -47,22 +47,22 @@ npm install -g wrangler
 # Login
 wrangler login
 
+# Create your local config from template (wrangler.toml is gitignored)
+cp wrangler.template.toml wrangler.toml
+
 # Create database
 wrangler d1 create nfl-loser-pickem-db
 ```
 
-**Copy the `database_id` and update `wrangler.toml`:**
+**Copy the `database_id` from the output and update your `wrangler.toml`:**
 ```toml
 [[d1_databases]]
 binding = "DB"
 database_name = "nfl-loser-pickem-db"
-database_id = "YOUR_DATABASE_ID_HERE"  # ← Paste here
+database_id = "YOUR_DATABASE_ID_HERE"  # ← Paste the database_id here
 ```
 
-Also uncomment and add your `account_id` at the top of `wrangler.toml`:
-```toml
-account_id = "your-account-id-here"  # ← Find in Cloudflare dashboard
-```
+> **Note:** `wrangler.toml` is in `.gitignore` because it contains account-specific IDs. Use `wrangler.template.toml` as a reference. The `account_id` is optional - wrangler will use your default account if not specified.
 
 **Run migrations:**
 ```powershell
