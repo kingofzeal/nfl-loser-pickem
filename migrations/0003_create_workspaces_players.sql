@@ -12,6 +12,7 @@ CREATE TABLE workspaces (
   reminder_friday_enabled INTEGER DEFAULT 1 NOT NULL,
   reminder_sunday_enabled INTEGER DEFAULT 1 NOT NULL,
   created_at TEXT DEFAULT (datetime('now')) NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now')),
   UNIQUE (platform, platform_workspace_id)
 );
 
@@ -26,6 +27,7 @@ CREATE TABLE players (
   is_admin INTEGER DEFAULT 0 NOT NULL, -- SQLite boolean as INTEGER
   joined_week_id INTEGER NULL REFERENCES weeks(week_id),
   created_at TEXT DEFAULT (datetime('now')) NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now')),
   UNIQUE (workspace_id, platform_user_id)
 );
 

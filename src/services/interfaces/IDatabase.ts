@@ -23,6 +23,7 @@ export interface IDatabase {
   
   // Season operations
   seasons: {
+    findById(id: number): Promise<Season | null>;
     findByYear(year: number): Promise<Season | null>;
     create(data: Partial<Season>): Promise<Season>;
     update(id: number, data: Partial<Season>): Promise<Season>;
@@ -51,6 +52,7 @@ export interface IDatabase {
   workspaces: {
     findById(id: number): Promise<Workspace | null>;
     findByPlatformId(platform: string, platformWorkspaceId: string): Promise<Workspace | null>;
+    findAll(): Promise<Workspace[]>;
     create(data: Partial<Workspace>): Promise<Workspace>;
     update(id: number, data: Partial<Workspace>): Promise<Workspace>;
   };

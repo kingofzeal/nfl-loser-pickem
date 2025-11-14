@@ -166,12 +166,12 @@ describe('Database Integration', () => {
   });
 
   describe('Teams', () => {
-    beforeAll(() => {
-      // Insert some test teams
+    beforeEach(() => {
+      // Seed minimal team data for each test (resetTestDb clears tables after each test)
       sqliteDb.exec(`
-        INSERT INTO teams (team_id, name, slug, city, abbreviation) VALUES
-        (1, 'Kansas City Chiefs', 'chiefs', 'Kansas City', 'KC'),
-        (2, 'Buffalo Bills', 'bills', 'Buffalo', 'BUF')
+        INSERT INTO teams (team_id, slug, name, conference, division) VALUES
+        (1, 'chiefs', 'Kansas City Chiefs', 'AFC', 'West'),
+        (2, 'bills', 'Buffalo Bills', 'AFC', 'East')
       `);
     });
 
@@ -385,8 +385,8 @@ describe('Database Integration', () => {
     let testTeamId: number;
 
     beforeEach(async () => {
-      // Setup test data
-      sqliteDb.exec(`INSERT INTO teams (team_id, name, slug, city, abbreviation) VALUES (10, 'Test Team', 'test', 'Test City', 'TST')`);
+      // Setup test data (seed a test team each time since resetTestDb clears tables)
+      sqliteDb.exec(`INSERT INTO teams (team_id, slug, name, conference, division) VALUES (10, 'test', 'Test Team', 'AFC', 'East')`);
       testTeamId = 10;
       
       const workspace = await db.workspaces.create({

@@ -1,6 +1,7 @@
 import { ICommandHandler } from './interfaces/ICommandHandler';
 import { CommandContext, CommandResponse } from '../types';
 import { IPickService } from '../services/interfaces/IPickService';
+import { IWeekService } from '../services/interfaces/IWeekService';
 import { IRenderService } from '../services/interfaces/IRenderService';
 import { IDatabase } from '../services/interfaces/IDatabase';
 
@@ -10,11 +11,12 @@ import { IDatabase } from '../services/interfaces/IDatabase';
 export class PickCommandHandler implements ICommandHandler {
   constructor(
     private pickService: IPickService,
+    private weekService: IWeekService,
     private renderService: IRenderService,
     private db: IDatabase
   ) {}
 
-  canExecute(context: CommandContext): boolean {
+  canExecute(_context: CommandContext): boolean {
     return true; // All players can make picks
   }
 
@@ -37,46 +39,28 @@ export class PickCommandHandler implements ICommandHandler {
       };
     }
 
-    // Get current week for active season
-    const activeSeason = await this.db.query<any>(
-      'SELECT * FROM seasons WHERE state = $1 ORDER BY year DESC LIMIT 1',
-      ['active']
-    );
+    // Get current year season
+    const currentYear = new Date().getFullYear();
+    const season = await this.db.seasons.findByYear(currentYear);
     
-    if (activeSeason.length === 0) {
+    if (!season || season.state !== 'active') {
       return {
         type: 'ephemeral',
         content: this.renderService.generateError('No active season found.')
       };
     }
 
-    const currentWeek = await this.db.query<any>(
-      'SELECT * FROM weeks WHERE season_id = $1 AND state IN ($2, $3) ORDER BY week_number ASC LIMIT 1',
-      [activeSeason[0].season_id, 'open', 'in_progress']
-    );
+    // Get current open week
+    const currentWeek = await this.weekService.getCurrentWeek(season.season_id);
 
-    if (currentWeek.length === 0) {
+    if (!currentWeek) {
       return {
         type: 'ephemeral',
         content: this.renderService.generateError('No open week found for picks.')
       };
     }
 
-    const weekId = currentWeek[0].week_id;
-
-    // Validate pick
-    const validation = await this.pickService.validatePick(
-      context.player_id,
-      weekId,
-      team.team_id
-    );
-
-    if (!validation.valid) {
-      return {
-        type: 'ephemeral',
-        content: this.renderService.generateError(validation.error!)
-      };
-    }
+    const weekId = currentWeek.week_id;
 
     // Check if player already has a pick this week
     const existingPick = await this.pickService.getPlayerPickForWeek(
@@ -89,7 +73,7 @@ export class PickCommandHandler implements ICommandHandler {
       // Change pick
       pick = await this.pickService.changePick(existingPick.pick_id, team.team_id);
     } else {
-      // Create new pick
+      // Create new pick (validation happens inside)
       pick = await this.pickService.createPick(
         context.player_id,
         weekId,
@@ -103,7 +87,7 @@ export class PickCommandHandler implements ICommandHandler {
       content: this.renderService.generatePickConfirmation(
         pick,
         team.name,
-        currentWeek[0].week_number
+        currentWeek.week_number
       )
     };
   }

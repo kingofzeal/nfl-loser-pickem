@@ -8,11 +8,11 @@ import { IRenderService } from '../services/interfaces/IRenderService';
 export class HelpCommandHandler implements ICommandHandler {
   constructor(private renderService: IRenderService) {}
 
-  canExecute(context: CommandContext): boolean {
+  canExecute(_context: CommandContext): boolean {
     return true; // Everyone can view help
   }
 
-  async execute(context: CommandContext, args: string[]): Promise<CommandResponse> {
+  async execute(_context: CommandContext, _args: string[]): Promise<CommandResponse> {
     return {
       type: 'ephemeral',
       content: this.renderService.generateHelp()

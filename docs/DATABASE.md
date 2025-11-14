@@ -32,15 +32,17 @@ Workspace Domain:     │
 ## Global Tables
 
 ### `teams`
-Stores all 32 NFL teams. Rarely changes.
+Stores all 32 NFL teams. Minimal immutable structure.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
-| team_id | SERIAL | PRIMARY KEY | Unique identifier |
-| slug | VARCHAR(10) | UNIQUE, NOT NULL | URL-friendly name (e.g., "ravens") |
-| name | VARCHAR(100) | NOT NULL | Full name (e.g., "Baltimore Ravens") |
-| conference | VARCHAR(3) | NOT NULL | AFC or NFC |
-| division | VARCHAR(10) | NOT NULL | North, South, East, West |
+| team_id | INTEGER (AUTOINCREMENT) | PRIMARY KEY | Unique identifier |
+| slug | TEXT | UNIQUE, NOT NULL | Stable identifier ("ravens") |
+| name | TEXT | NOT NULL | Full display name |
+| conference | TEXT | NOT NULL | AFC or NFC (CHECK) |
+| division | TEXT | NOT NULL | North, South, East, West (CHECK) |
+
+Removed legacy `city` and `abbreviation` fields—reduces redundancy; presentation handled by `name`.
 
 **Indexes:**
 - `idx_teams_slug` on `slug`
@@ -99,6 +101,7 @@ Individual NFL games.
 | winner_team_id | INTEGER | NULL, FOREIGN KEY → teams.team_id | Winning team (null if tie) |
 | external_id | VARCHAR(50) | NULL | ESPN/TheSportsDB game ID |
 | updated_at | TIMESTAMP | DEFAULT NOW() | Last sync time |
+| (Manually set on UPDATE; no triggers in D1) |
 
 **Indexes:**
 - `idx_games_week` on `week_id`
@@ -124,6 +127,7 @@ Each Slack workspace or Discord server.
 | reminder_enabled | BOOLEAN | DEFAULT true | Send reminders |
 | reminder_friday_enabled | BOOLEAN | DEFAULT true | Send Friday reminders |
 | reminder_sunday_enabled | BOOLEAN | DEFAULT true | Send Sunday reminders |
+| (Stored as INTEGER 1/0 in D1; coerced in code) |
 | created_at | TIMESTAMP | DEFAULT NOW() | |
 
 **Constraints:**
@@ -170,6 +174,7 @@ Player picks for each week.
 | outcome | VARCHAR(20) | NULL | win, loss (null until finalized) |
 | created_at | TIMESTAMP | DEFAULT NOW() | Original pick time |
 | updated_at | TIMESTAMP | DEFAULT NOW() | Last change time |
+| (Manually updated in application layer) |
 
 **Constraints:**
 - UNIQUE (week_id, player_id) — one pick per week
@@ -234,7 +239,7 @@ Enforced via query: `SELECT team_id FROM picks WHERE player_id = ? AND week_id I
 Enforced by UNIQUE constraint on `(week_id, player_id)` in `picks` table.
 
 ### Team Must Play in Week
-Enforced by trigger: `check_team_plays_in_week()` validates that the picked team has a game (not cancelled) in that week.
+Validated via service-layer query (D1 has no triggers). Pick rejected if team lacks scheduled (non-cancelled) game that week.
 
 ### Workspace Isolation
 All queries for workspace-scoped tables MUST filter by `workspace_id` or join through `players` table.
@@ -243,6 +248,8 @@ All queries for workspace-scoped tables MUST filter by `workspace_id` or join th
 Picks locked when `games.kickoff_time <= NOW()` for the game involving the picked team.
 
 ### Pick Unlocking (Postponements)
+### Empty Week Finalization
+Weeks with zero games are not considered finalized; prevents premature season rollover.
 When a game is postponed and kickoff time updated, picks are automatically unlocked until the new kickoff time.
 
 ### Outcome Calculation
@@ -275,7 +282,7 @@ Migrations stored in `migrations/` directory, numbered sequentially:
 - `006_add_indexes.sql`
 - `007_add_archive_tracking.sql`
 
-Use a migration tool like `node-pg-migrate` or `db-migrate`.
+Executed via Wrangler D1 migrations; timestamps stored as TEXT (ISO). UPDATE statements set `updated_at` explicitly.
 
 ---
 

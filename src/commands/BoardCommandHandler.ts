@@ -14,26 +14,24 @@ export class BoardCommandHandler implements ICommandHandler {
     private db: IDatabase
   ) {}
 
-  canExecute(context: CommandContext): boolean {
+  canExecute(_context: CommandContext): boolean {
     return true; // All players can view the board
   }
 
   async execute(context: CommandContext, args: string[]): Promise<CommandResponse> {
     // Get active season
-    const activeSeason = await this.db.query<any>(
-      'SELECT * FROM seasons WHERE state IN ($1, $2) ORDER BY year DESC LIMIT 1',
-      ['active', 'completed']
-    );
+    const currentYear = new Date().getFullYear();
+    const season = await this.db.seasons.findByYear(currentYear);
     
-    if (activeSeason.length === 0) {
+    if (!season) {
       return {
         type: 'ephemeral',
-        content: this.renderService.generateError('No active season found.')
+        content: this.renderService.generateError('No season found for current year.')
       };
     }
 
-    const seasonId = activeSeason[0].season_id;
-    const seasonYear = activeSeason[0].year;
+    const seasonId = season.season_id;
+    const seasonYear = season.year;
 
     // Parse optional week number
     let weekNumber: number | undefined;

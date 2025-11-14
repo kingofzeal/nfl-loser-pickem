@@ -1,8 +1,53 @@
-# Database Seeding Scripts
+# NFL Loser Pick'em Bot - Deployment Scripts
 
-These SQL scripts seed the D1 database with initial data.
+This directory contains scripts to help with deployment, database seeding, and maintenance.
 
-## Prerequisites
+## Deployment Scripts
+
+### `register-discord-commands.js`
+Registers Discord slash commands with the Discord API.
+
+**Usage:**
+```bash
+# Using environment variables (recommended)
+DISCORD_TOKEN=your_token APPLICATION_ID=your_app_id node scripts/register-discord-commands.js
+
+# For guild-specific commands (instant updates)
+DISCORD_TOKEN=your_token APPLICATION_ID=your_app_id node scripts/register-discord-commands.js --guild=YOUR_GUILD_ID
+```
+
+**When to run:**
+- After creating your Discord application
+- When adding new commands
+- When modifying command options
+
+### `deploy.sh`
+Interactive deployment script that walks through the entire setup process.
+
+**Usage:**
+```bash
+# Make executable (Linux/Mac)
+chmod +x scripts/deploy.sh
+
+# Run
+./scripts/deploy.sh
+
+# On Windows, use Git Bash or WSL
+```
+
+**What it does:**
+1. Checks Cloudflare authentication
+2. Creates D1 database
+3. Runs migrations
+4. Seeds data (teams and season)
+5. Configures secrets
+6. Builds the project
+7. Deploys to Cloudflare Workers
+8. Registers Discord commands
+
+## Database Seeding Scripts
+
+### seed-teams.sql
 
 1. Create D1 database: `wrangler d1 create nfl-loser-pickem-db`
 2. Update `database_id` in `wrangler.toml` with the created database ID

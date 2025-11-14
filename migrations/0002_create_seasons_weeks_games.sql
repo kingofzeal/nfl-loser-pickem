@@ -5,7 +5,8 @@ CREATE TABLE seasons (
   season_id INTEGER PRIMARY KEY AUTOINCREMENT,
   year INTEGER UNIQUE NOT NULL,
   weeks_count INTEGER DEFAULT 18 NOT NULL,
-  state TEXT NOT NULL DEFAULT 'upcoming' CHECK (state IN ('upcoming', 'active', 'completed'))
+  state TEXT NOT NULL DEFAULT 'upcoming' CHECK (state IN ('upcoming', 'active', 'completed')),
+  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE INDEX idx_seasons_year ON seasons(year);
@@ -18,6 +19,7 @@ CREATE TABLE weeks (
   state TEXT NOT NULL DEFAULT 'scheduled' CHECK (state IN ('scheduled', 'open', 'in_progress', 'finalized')),
   open_at TEXT NULL, -- SQLite uses TEXT for timestamps (ISO 8601 format)
   close_at TEXT NULL,
+  updated_at TEXT DEFAULT (datetime('now')),
   UNIQUE (season_id, week_number)
 );
 

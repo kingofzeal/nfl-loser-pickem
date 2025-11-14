@@ -1,0 +1,2 @@
+-- Deprecated migration (updated_at columns moved into original table definitions)
+-- Intentionally left blank.

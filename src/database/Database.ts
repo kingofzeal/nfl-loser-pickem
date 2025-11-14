@@ -20,9 +20,8 @@ import { logger } from '../utils/logger';
 class BatchCollector implements ITransactionClient {
   statements: D1PreparedStatement[] = [];
 
-  async query<T = any>(text: string, params?: any[]): Promise<T[]> {
-    // Note: This is a simplified interface - in real usage you'd need access to D1Database
-    // For now, this is a placeholder to show the pattern
+  async query<T = any>(_text: string, _params?: any[]): Promise<T[]> {
+    // Placeholder: In a future implementation, this would collect statements
     throw new Error('BatchCollector.query not yet implemented - use direct batch API instead');
   }
 }
@@ -127,6 +126,13 @@ export class Database implements IDatabase {
    * Season operations
    */
   seasons = {
+    findById: async (id: number): Promise<Season | null> => {
+      const rows = await this.query<Season>(
+        'SELECT * FROM seasons WHERE season_id = ?',
+        [id]
+      );
+      return rows[0] || null;
+    },
     findByYear: async (year: number): Promise<Season | null> => {
       const rows = await this.query<Season>(
         'SELECT * FROM seasons WHERE year = ?',
@@ -219,6 +225,8 @@ export class Database implements IDatabase {
     },
 
     create: async (data: Partial<Week>): Promise<Week> => {
+      const openAtVal = data.open_at instanceof Date ? data.open_at.toISOString() : data.open_at;
+      const closeAtVal = data.close_at instanceof Date ? data.close_at.toISOString() : data.close_at;
       const result = await this.db.prepare(
         `INSERT INTO weeks (season_id, week_number, state, open_at, close_at)
          VALUES (?, ?, ?, ?, ?)`
@@ -226,8 +234,8 @@ export class Database implements IDatabase {
         data.season_id, 
         data.week_number, 
         data.state || 'scheduled', 
-        data.open_at || null, 
-        data.close_at || null
+        openAtVal || null, 
+        closeAtVal || null
       ).run();
 
       if (!result.success) {
@@ -251,11 +259,13 @@ export class Database implements IDatabase {
       }
       if (data.open_at !== undefined) {
         fields.push('open_at = ?');
-        values.push(data.open_at);
+        const openAtVal = data.open_at instanceof Date ? data.open_at.toISOString() : data.open_at;
+        values.push(openAtVal);
       }
       if (data.close_at !== undefined) {
         fields.push('close_at = ?');
-        values.push(data.close_at);
+        const closeAtVal = data.close_at instanceof Date ? data.close_at.toISOString() : data.close_at;
+        values.push(closeAtVal);
       }
 
       fields.push("updated_at = datetime('now')");
@@ -305,6 +315,7 @@ export class Database implements IDatabase {
     },
 
     create: async (data: Partial<Game>): Promise<Game> => {
+      const kickoffVal = data.kickoff_time instanceof Date ? data.kickoff_time.toISOString() : data.kickoff_time;
       const result = await this.db.prepare(
         `INSERT INTO games (
           week_id, external_id, home_team_id, away_team_id,
@@ -313,7 +324,7 @@ export class Database implements IDatabase {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         data.week_id, data.external_id, data.home_team_id, data.away_team_id,
-        data.kickoff_time, data.status || 'scheduled', 
+        kickoffVal, data.status || 'scheduled', 
         data.home_score || null, data.away_score || null, data.winner_team_id || null
       ).run();
 
@@ -372,6 +383,14 @@ export class Database implements IDatabase {
     },
 
     allFinalForWeek: async (weekId: number): Promise<boolean> => {
+      // First check if there are any games; an empty week shouldn't be considered final
+      const gameCountRows = await this.query<{ cnt: number }>(
+        'SELECT COUNT(1) as cnt FROM games WHERE week_id = ?',
+        [weekId]
+      );
+      if (gameCountRows[0].cnt === 0) {
+        return false;
+      }
       const rows = await this.query<{ all_final: number }>(
         `SELECT NOT EXISTS(
           SELECT 1 FROM games 
@@ -379,7 +398,6 @@ export class Database implements IDatabase {
          ) as all_final`,
         [weekId]
       );
-      // SQLite returns 0/1 for boolean expressions
       return rows[0].all_final === 1;
     },
   };
@@ -405,6 +423,14 @@ export class Database implements IDatabase {
     },
 
     create: async (data: Partial<Workspace>): Promise<Workspace> => {
+      // Coerce boolean flags to INTEGER (1/0) explicitly to avoid driver ambiguity
+      const fridayFlag = data.reminder_friday_enabled === undefined
+        ? 1
+        : (data.reminder_friday_enabled ? 1 : 0);
+      const sundayFlag = data.reminder_sunday_enabled === undefined
+        ? 1
+        : (data.reminder_sunday_enabled ? 1 : 0);
+
       const result = await this.db.prepare(
         `INSERT INTO workspaces (
           platform, platform_workspace_id, name,
@@ -415,8 +441,8 @@ export class Database implements IDatabase {
         data.platform, 
         data.platform_workspace_id, 
         data.name,
-        data.reminder_friday_enabled ?? 1,  // SQLite: 1 = true, 0 = false
-        data.reminder_sunday_enabled ?? 1
+        fridayFlag,
+        sundayFlag
       ).run();
 
       if (!result.success) {
@@ -463,6 +489,10 @@ export class Database implements IDatabase {
         [id]
       );
       return rows[0];
+    },
+
+    findAll: async (): Promise<Workspace[]> => {
+      return this.query<Workspace>('SELECT * FROM workspaces');
     },
   };
 
@@ -640,7 +670,8 @@ export class Database implements IDatabase {
       }
       if (data.locked_at !== undefined) {
         fields.push('locked_at = ?');
-        values.push(data.locked_at);
+        const lockedVal = data.locked_at instanceof Date ? data.locked_at.toISOString() : data.locked_at;
+        values.push(lockedVal);
       }
       if (data.outcome !== undefined) {
         fields.push('outcome = ?');
