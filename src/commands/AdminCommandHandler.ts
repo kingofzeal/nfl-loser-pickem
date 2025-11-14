@@ -190,11 +190,73 @@ export class AdminCommandHandler implements ICommandHandler {
     };
   }
 
-  private async resetPick(_context: CommandContext, _args: string[]): Promise<CommandResponse> {
-    // TODO: Implement pick reset
+  private async resetPick(_context: CommandContext, args: string[]): Promise<CommandResponse> {
+    if (args.length < 2) {
+      return {
+        type: 'ephemeral',
+        content: this.renderService.generateError('Please specify week number and player name. Usage: /nfl admin reset-pick <week> <player>')
+      };
+    }
+
+    const weekNumber = parseInt(args[0]);
+    if (isNaN(weekNumber)) {
+      return {
+        type: 'ephemeral',
+        content: this.renderService.generateError('Invalid week number.')
+      };
+    }
+
+    const playerName = args.slice(1).join(' ').toLowerCase();
+
+    // Get active season
+    const currentYear = new Date().getFullYear();
+    const season = await this.db.seasons.findByYear(currentYear);
+    
+    if (!season) {
+      return {
+        type: 'ephemeral',
+        content: this.renderService.generateError('No season found for current year.')
+      };
+    }
+
+    // Find week
+    const week = await this.db.weeks.findBySeasonAndNumber(season.season_id, weekNumber);
+    if (!week) {
+      return {
+        type: 'ephemeral',
+        content: this.renderService.generateError(`Week ${weekNumber} not found.`)
+      };
+    }
+
+    // Find player by display name
+    const allPlayers = await this.db.players.findByWorkspace(_context.workspace_id);
+    const player = allPlayers.find(p => p.display_name.toLowerCase().includes(playerName));
+
+    if (!player) {
+      return {
+        type: 'ephemeral',
+        content: this.renderService.generateError(`Player "${args.slice(1).join(' ')}" not found.`)
+      };
+    }
+
+    // Find and delete pick
+    const pick = await this.db.picks.findByWeekAndPlayer(week.week_id, player.player_id);
+    
+    if (!pick) {
+      return {
+        type: 'ephemeral',
+        content: this.renderService.generateError(`No pick found for ${player.display_name} in Week ${weekNumber}.`)
+      };
+    }
+
+    await this.db.picks.delete(pick.pick_id);
+
     return {
       type: 'ephemeral',
-      content: this.renderService.generateError('Pick reset not yet implemented.')
+      content: {
+        title: '✅ Pick Reset',
+        description: `Pick for ${player.display_name} in Week ${weekNumber} has been deleted. They can now make a new pick.`
+      }
     };
   }
 

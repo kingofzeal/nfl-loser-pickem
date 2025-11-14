@@ -160,7 +160,8 @@ export class RenderService implements IRenderService {
                '`/nfl admin sync` - Sync current week from ESPN\n' +
                '`/nfl admin sync <week>` - Sync specific week from ESPN\n' +
                '`/nfl admin sync <start>-<end>` - Sync week range (e.g., 1-11)\n' +
-               '`/nfl admin sync all` - Sync all active weeks from ESPN',
+               '`/nfl admin sync all` - Sync all active weeks from ESPN\n' +
+               '`/nfl admin reset-pick <week> <player>` - Delete a player\'s pick',
       });
     }
 
